@@ -38,6 +38,15 @@ test('parseDriftReport 正控：真实漂移报告 → checks=44 / findings=0', 
   assert.deepEqual(r.items, []);
 });
 
+// ── 跨 Node 版本：汇总行前缀不同 ───────────────────────────
+test('parseNodeTest：Node 20 的 "# tests/# pass" 格式也要能解析（CI 矩阵真实踩过）', () => {
+  const legacy = ['# tests 47', '# suites 0', '# pass 47', '# fail 0', '# cancelled 0', '# skipped 0', '# todo 0'].join('\n');
+  const r = parseNodeTest(legacy);
+  assert.equal(r.total, 47);
+  assert.equal(r.passed, 47);
+  assert.equal(r.failed, 0);
+});
+
 // ── 负控：解析失败必须抛错，不能返回 0 ─────────────────────
 test('parseNodeTest 负控：空输出 → 必须抛错（不能返回 passed=0 冒充"跑过"）', () => {
   assert.throws(() => parseNodeTest(''), /无法解析测试输出/);

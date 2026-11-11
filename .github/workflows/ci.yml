@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node: ['20', '22']
+        node: ['20', '22', '24']
     steps:
       - uses: actions/checkout@v4
 
@@ -55,4 +55,5 @@ jobs:
           path: |
             .selfcheck/
             .evidence-raw/
+          include-hidden-files: true   # .selfcheck/ 与 .evidence-raw/ 是隐藏目录，v4 默认跳过
           if-no-files-found: ignore
