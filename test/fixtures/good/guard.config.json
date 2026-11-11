@@ -1,0 +1,20 @@
+{
+  "boundaries": {
+    "web": ["web/"],
+    "server": ["src/"],
+    "shared": ["shared/"]
+  },
+  "forbidImports": [
+    { "from": "web", "to": "server" },
+    { "from": "server", "to": "web" }
+  ],
+  "contractPrefixes": ["shared/"],
+  "maxNesting": 3,
+  "dupWindow": 6,
+  "dupMinChars": 40,
+  "yagniMinNonGoals": 3,
+  "dryMinReuse": 1,
+  "dependencies": {},
+  "allowedPrefixes": ["src/"],
+  "maxDiffLines": 400
+}

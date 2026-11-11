@@ -1,0 +1,8 @@
+[
+  { "pattern": "预留(?:了)?(?:接口|字段|扩展点|位置)", "why": "预留扩展点" },
+  { "pattern": "未来可能(?:会)?(?:用到|需要)", "why": "未来可能用到" },
+  { "pattern": "(?:for|in)\\s+future\\s+use", "flags": "i", "why": "for future use" },
+  { "pattern": "为了?将来(?:扩展|对接)", "why": "为了将来扩展" },
+  { "pattern": "TODO\\s*[:：]\\s*(?:later|以后|后续再)", "flags": "i", "why": "TODO later" },
+  { "pattern": "暂未使用[，,]\\s*但", "why": "暂未使用但" }
+]

@@ -1,0 +1,6 @@
+{
+  "tests": { "command": "node test/guard.test.mjs" },
+  "mutation": { "command": "node test/mutation.mjs" },
+  "drift": { "command": "node tools/check-contract.mjs" },
+  "keepOutputs": false
+}

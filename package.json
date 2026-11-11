@@ -1,0 +1,53 @@
+{
+  "name": "sdd-guard",
+  "version": "0.1.0",
+  "description": "把 YAGNI/KISS/DRY 与前后端解耦里可机械判定的部分变成会 FAIL 的规格驱动开发检查器（零依赖）",
+  "license": "MIT",
+  "author": "Xu3_Zhen1",
+  "type": "module",
+  "bin": {
+    "sdd-guard": "cli.mjs"
+  },
+  "main": "cli.mjs",
+  "files": [
+    "cli.mjs",
+    "lib/",
+    "tools/",
+    "templates/",
+    "docs/",
+    "AGENTS.md.template",
+    "guard.config.json",
+    "evidence.config.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check": "node cli.mjs check",
+    "test": "node test/guard.test.mjs && node test/args.test.mjs && node test/evidence.test.mjs && node test/mutation.mjs",
+    "self-check": "node tools/self-check.mjs",
+    "publish-check": "node tools/check-publish.mjs"
+  },
+  "keywords": [
+    "spec-driven-development",
+    "sdd",
+    "yagni",
+    "kiss",
+    "dry",
+    "lint",
+    "code-review",
+    "acceptance-criteria",
+    "mutation-testing",
+    "deepseek-harness"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Xu3Zhen1/sdd-guard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Xu3Zhen1/sdd-guard/issues"
+  },
+  "homepage": "https://github.com/Xu3Zhen1/sdd-guard#readme"
+}

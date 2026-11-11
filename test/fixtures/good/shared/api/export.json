@@ -1,0 +1,6 @@
+{
+  "endpoint": "POST /export",
+  "request": { "ids": "string[]" },
+  "response": { "bytes": "binary" },
+  "errors": [{ "code": "E_EMPTY_INPUT", "status": 400 }]
+}

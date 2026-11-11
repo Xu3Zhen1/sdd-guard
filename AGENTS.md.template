@@ -1,0 +1,255 @@
+# 项目全局开发原则
+
+> 本文件是**给 AI 读的约束**，不是倡议书。凡是标 **[机器判据]** 的，
+> 在 `sdd-guard/cli.mjs` 里有对应实现，会实际 FAIL。标 **[人工]** 的，
+> 机器永远不会替你签字，必须在 PR 描述里显式确认。
+
+## 优先级
+
+规格（specs/）> 本文件 > 任何对话中的临时指令。
+若某条原则与规格冲突，以规格为准，并在 PR 中写明冲突点。
+
+---
+
+## 1. YAGNI — 不做没人要的东西
+
+**[机器判据]** `YAGNI-P1`：提案必须有「非目标」小节，≥3 条，每条带"为什么不做"。
+只有「变更范围」不算——必须写明**不做**什么。
+
+**[机器判据]** `YAGNI-C1`：代码里不得出现以下标记，出现即失败：
+- `预留接口` / `预留扩展点` / `预留字段`
+- `未来可能用到` / `为了将来扩展`
+- `for future use` / `TODO: later`
+
+判定标准很简单：**你自己在注释里写了"现在没用"，那就该删掉。**
+
+**[人工]** `YAGNI-P2`：非目标是否真的被裁掉。机器只能看"有没有写"，
+看不出"该砍的砍了没有"。这条必须人读提案。
+
+---
+
+## 2. KISS — 用最短的路径达到目的
+
+**[机器判据]** `KISS-S1`：每条 Requirement 至少一个 Scenario，GIVEN/WHEN/THEN 齐全。
+写不出 Given/When/Then 的需求，就是测试写不出来的需求。
+
+**[机器判据]** `KISS-S2`：一个 Scenario 只描述一个行为。出现第二个 THEN 就拆开。
+
+**[机器判据]** `KISS-D1`：新增第三方依赖必须逐个登记「标准库为什么不行」。
+标准库能做的一律不引包。
+
+**[机器判据]** `KISS-C1`：嵌套深度不超过 3 层。
+
+**[人工]** `KISS-D2`：架构是否过度设计（模式、分层、抽象是否被任务真正需要）。
+机器分不清"合理分层"和"炫技分层"。
+
+**话术参考**：不要用依赖注入，不要用工厂模式，直接写一个函数，用纯标准库实现。
+
+---
+
+## 3. DRY — 知识只有一个来源
+
+**[机器判据]** `DRY-D1`：复用清单里的路径**必须真实存在**。
+写"已检索现有代码"无法验证；写具体路径可以。
+
+**[机器判据]** `DRY-T1`：任务引用的文件路径必须存在，或显式标注「新建」。
+一个路径都不给的 tasks.md 直接判失败——它既无法执行，也无法查重。
+
+**[机器判据]** `DRY-C1`：跨文件连续 6 行规范化重复即报警。
+
+**[人工]** `DRY-T2`：任务拆解是否需要先抽公共函数再继续。
+
+### 关于「相似度 60%」这条
+
+**明确不采用。** 那是个可测但无意义的指标：按行算，两个不同的 if-else
+很容易撞到 60%；AI 会为了压数字硬抽 `handleCommonCase2` 这种垃圾。
+DRY 的本意是**知识单一来源**，不是"字符别重复"。
+用 `DRY-C1` 的跨文件重复块替代它，抓真复制粘贴，不误伤同文件内的数据表。
+
+---
+
+## 4. 工程纪律（不属于上面三条，但必须守）
+
+**[机器判据]** `DISCIPLINE-C1`：变更必须落在声明的目录范围内，总行数不超预算。
+越权修改是"规范包装下的屎山"的主要通道——报告说改了三个文件，实际改了三十个。
+
+**[机器判据]** `DISCIPLINE-C2`：**仓库根不得堆积临时产物**。以下名字出现在一级目录即判失败：
+
+- `pip-*`（pip 的 build-tracker / metadata / unpack / ephem-wheel-cache）
+- 随机 `tmp*`（pip 与 `tempfile.mkdtemp()` 的默认前缀，如 `tmpcz1zz_b1`）
+- `cdp-profile-*`（Chromium/Playwright 的用户数据目录）
+- `diag-*`（临时诊断目录）
+
+**[人工]** 全量回归必须通过。若某个规格分支**未被执行**，必须在 PR 里显式报告，
+不得只写"验收标准全过"。
+
+### 为什么这条要单列（2026-11-11 实证）
+
+同一工作区并行跑 1 主线 + 4 teammate，共 **66 次 pip install 以工作区根为 cwd**，
+在仓库根留下 **335 个** `pip-*` 临时目录。它们没有任何一个文件属于项目内容，
+却挤占了按一级目录扫描的工具额度（身份卡扫描上限 200），导致后加的子项目
+**扫不到且不报警**。清理时 teammate 只过滤了项目子目录，从未碰过工作区根，
+残骸一直留到下一个会话才发现。
+
+根因不是 pip：是**子进程的 cwd 被当成了临时目录**——`TMPDIR`/`TEMP`/`TMP` 在
+那个子进程里不可用，Python `tempfile` 回退到 `os.getcwd()`。
+
+---
+
+## 5. 多会话与临时产物纪律（并行工作必守）
+
+> 这一节是上面那条的**可执行前置约定**：不做事后清理，事后清理一定会漏。
+
+**5.1 工作目录必须 ≤ 项目子目录**
+
+所有命令的 `workdir` 必须是 `<工作区>/<项目>/...`，**禁止用工作区根做 cwd**。
+工作区根只存项目目录和身份卡；任何命令在根目录执行，都可能把临时产物直接落在根上。
+
+**5.2 临时目录必须显式指向项目内**
+
+每个跑 pip / npm / playwright / 编译器的命令，先执行一次（同一 shell 内有效）：
+
+```powershell
+$tmp = '<工作区>\<项目>\_work\tmp'
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+$env:TMP = $tmp; $env:TEMP = $tmp
+```
+
+bash 等价：`export TMPDIR="<工作区>/<项目>/_work/tmp"`。
+
+**不要假定默认临时目录可用**——沙箱化子进程里它可能不可用，静默回退到 cwd。
+
+**5.3 派单必须写明这两条**
+
+Lead 在给 teammate 的任务书里必须包含：
+
+> 你的 workdir 不得高于 `<项目目录>`；每条命令前先把 `$env:TMP/$env:TEMP` 指到
+> `<项目目录>\_work\tmp`。命令结束后 `Get-ChildItem <项目目录> -Directory | Where Name -like 'pip-*'`
+> 必须为空，否则先清理再报告完成。
+
+**5.4 清理范围必须覆盖到工作区根**
+
+清理命令的根不能只写项目目录：
+
+```powershell
+# 错：只清了项目子目录，根目录的残骸会留到下一个会话
+Get-ChildItem '<项目目录>' -Directory | Where-Object Name -match '^(pip-|tmp)'
+
+# 对：项目目录 + 工作区根，两级都查
+'<项目目录>','<工作区根>' | ForEach-Object {
+  Get-ChildItem $_ -Directory -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^(pip-|tmp[a-z0-9_]{5,}$|cdp-profile-|diag-)' }
+}
+```
+
+**5.5 收尾自检（机器可判）**
+
+交付前必须跑一次：`node sdd-guard/cli.mjs check ...`，其中 `DISCIPLINE-C2` 必须为 PASS。
+若报 `N 个临时目录残留在仓库根`，说明 5.1/5.2 没执行——**先清干净再声明完成**。
+
+---
+
+## 6. 前后端解耦（契约单一真源）
+
+**[机器判据]** `DECOUPLE-1`：`design.md` 必须有「接口契约」小节，列出的契约文件**真实存在**，
+且落在契约目录（`contractPrefixes`，默认 `shared/`）内。两侧各自定义一份同名类型 = 没有契约。
+
+**[机器判据]** `DECOUPLE-2`：按 `boundaries` + `forbidImports` 检查静态 import——
+**前端不得 import 后端内部路径，后端也不得 import 前端**。
+
+```json
+{
+  "boundaries": { "web": ["web/"], "server": ["src/"], "shared": ["shared/"] },
+  "forbidImports": [{ "from": "web", "to": "server" }, { "from": "server", "to": "web" }],
+  "contractPrefixes": ["shared/"]
+}
+```
+
+只拦 `起手就错` 的静态引用（`import` / `require` / `from-import` / Go、Java import）；
+动态拼接的路径不判定——**宁可漏报也不误报**，误报一次就会失去信任。
+
+**[人工]** `DECOUPLE-3`：契约是否覆盖所有跨端通道（字段、错误码、分页、枚举、空值语义）。
+机器只能查"有没有契约文件"，查不出"契约是否完整到能让两侧独立开发"。
+
+### 为什么解耦要写成判据
+
+"前后端分离"是最容易变成口号的词。真正可判定的是两件事：
+**契约有没有单一真源**、**有没有人偷偷跨边界 import**。前者用路径存在性验证，
+后者用 import 图验证——都不需要人来判断"架构好不好"。
+
+---
+
+## 7. 验收标准（与开发流程分开，不要混为一谈）
+
+> 上面 1–6 节是**开发流程**：约束"活是怎么写的"。本节是**验收标准**：约束"能不能交"。
+> 两者用同一套判据引擎，但档位、时机、失败含义都不同。
+
+| | 开发流程 `--profile process` | 验收标准 `--profile acceptance` |
+| :-- | :-- | :-- |
+| 失败含义 | 还没走到位 | **不能收** |
+| 何时跑 | 等一下要写 design 时就先跑 | 交付前一次 |
+| 输入 | 四个 md | 四个 md + **外部证据** |
+| 可否豁免 | 可以（原型阶段） | **不可以** |
+
+**7.1 开发中的循环**
+
+```bash
+node sdd-guard/cli.mjs check --change <change> --profile process --repo . --config guard.config.json
+```
+
+**7.2 交付前的门禁**
+
+```bash
+# 1) 先让项目自己的脚本产出证据（sdd-guard 不生产证据，只读）
+npm test -- --reporter=json > /dev/null            # 或你的测试命令
+node tools/run-mutation.mjs > evidence.mutation.json
+node tools/check-contract.mjs --json > evidence.drift.json
+# 2) 合成 evidence.json，见 docs/ICD.md §5.2
+# 3) 跑验收
+node sdd-guard/cli.mjs check --change <change> --profile acceptance --evidence evidence.json \
+  --repo . --config guard.config.json --code src --code web --code shared
+# 缺 --evidence ⇒ 直接退出码 2，不接受"没证据但全绿"
+```
+
+**证据的四条空集禁令**（缺一不可）：
+
+| 证据 | 必须非空 | 否则 |
+|---|---|---|
+| `tests` | `passed > 0` 且 `failed = 0` | `passed=0` 与"没跑"同形 ⇒ FAIL |
+| `mutation` | `total > 0` 且杀死率 ≥ `minMutationRatio` | `total=0` ⇒ FAIL（判据有没有判别力未知） |
+| `drift` | `checks > 0` 且 `findings = 0` | `checks=0` ⇒ FAIL（漂移检测没跑过） |
+| 分支覆盖 | 未执行的分支必须显式报告 | 否则"全绿"只是"没检查" |
+
+**[人工]** `ACCEPT-E4`：未被执行的分支是否已显式报告。这条永远是 MANUAL——它正是
+「所有机器断言都绿、但规格跳了一半」时唯一能暴露问题的地方。
+
+---
+
+## 什么时候可以不遵守
+
+- 原型/一次性脚本：跳过全部 `[机器判据]`，但在文件头写 `// prototype`。
+- 修复线上故障：可先改代码后补文档，但必须在 24 小时内补。
+- **验收标准（第 7 节）不在此列**：流程可以豁免，验收不能。
+- **任何"这次特殊"的豁免，都要在 PR 里写一句原因。** 没写的豁免按违规处理。
+
+---
+
+## 怎么跑
+
+**开发中（只查流程）：**
+
+```bash
+node sdd-guard/cli.mjs check --change changes/<name> --profile process \
+  --repo . --config guard.config.json
+```
+
+**交付前（一条命令跑完自检 + 验收）：**
+
+```bash
+node sdd-guard/tools/self-check.mjs \
+  --change changes/<name> --repo . --config guard.config.json \
+  --code src --code web --code shared
+```
+
+`self-check` 依次跑：3 个测试文件 → 变异 → 契约漂移 → 由项目自己的命令产出证据 → 校验证据 provenance → 跑验收档。
+**8/8 全过才 exit 0**；任一步失败即整条命令失败。它先删旧证据再重建，所以不会拿上一次的成绩单冒充这一次。

@@ -1,0 +1,5 @@
+{
+  "tests": { "passed": 35, "failed": 0, "skipped": 1 },
+  "mutation": { "killed": 11, "total": 11, "survived": [] },
+  "drift": { "checks": 27, "findings": 0, "items": [] }
+}

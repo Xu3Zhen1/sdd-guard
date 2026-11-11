@@ -1,0 +1,19 @@
+# 统一 LF：仓库里存的行尾一律 LF，Windows 检出也保持 LF。
+# 目的：跨平台 diff 不因行尾噪声爆炸，评审只看真实改动。
+* text=auto eol=lf
+
+*.mjs      text eol=lf
+*.cjs      text eol=lf
+*.js       text eol=lf
+*.json     text eol=lf
+*.md       text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.ps1      text eol=lf
+*.sh       text eol=lf
+
+*.png      binary
+*.jpg      binary
+*.ico      binary
+*.zip      binary
+*.zst      binary

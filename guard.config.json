@@ -1,0 +1,13 @@
+{
+  "contractPrefixes": ["lib/"],
+  "boundaries": {},
+  "forbidImports": [],
+  "maxNesting": 3,
+  "dupWindow": 6,
+  "dupMinChars": 40,
+  "yagniMinNonGoals": 3,
+  "dryMinReuse": 1,
+  "dependencies": {},
+  "allowedPrefixes": ["lib/", "tools/", "test/", "docs/", "changes/"],
+  "maxDiffLines": 400
+}

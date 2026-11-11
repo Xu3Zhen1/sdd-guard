@@ -1,0 +1,21 @@
+# 运行产物：可重新生成，不进仓库
+.selfcheck/
+.evidence-raw/
+/evidence.json
+node_modules/
+npm-debug.log*
+
+# DSH 内部身份卡：属于本机工作区拓扑，不属于本仓库
+whoiam.md
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 临时文件
+*.tmp
+*.bak
+*.orig

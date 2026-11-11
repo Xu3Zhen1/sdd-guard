@@ -1,0 +1,46 @@
+  ok    退出码 contract 与 runner 一致: {"OK":0,"FAIL":1,"CONFIG":2}
+  ok    ICD 记录了退出码 0(OK)
+  ok    ICD 记录了退出码 1(FAIL)
+  ok    ICD 记录了退出码 2(CONFIG)
+  ok    ICD 记录了全部 4 种结论状态
+  ok    runner 图标表与四态一致
+  ok    可重复选项一致: [code]
+  ok    ICD 选项表的 11 个选项全部存在于契约
+  ok    契约的 11 个选项全部在 ICD 选项表中出现
+  ok    --change 可重复性一致: 不累积
+  ok    --config 可重复性一致: 不累积
+  ok    --repo 可重复性一致: 不累积
+  ok    --code 可重复性一致: 可累积
+  ok    --diff 可重复性一致: 不累积
+  ok    --only 可重复性一致: 不累积
+  ok    --profile 可重复性一致: 不累积
+  ok    --evidence 可重复性一致: 不累积
+  ok    --json 可重复性一致: 不累积
+  ok    --strict 可重复性一致: 不累积
+  ok    --help 可重复性一致: 不累积
+  ok    ICD 记录了全部 12 个配置键
+  ok    配置默认值 maxNesting=3（rules.mjs 实测一致）
+  ok    配置默认值 dupWindow=6（rules.mjs 实测一致）
+  ok    配置默认值 dupMinChars=40（rules.mjs 实测一致）
+  ok    配置默认值 yagniMinNonGoals=3（rules.mjs 实测一致）
+  ok    配置默认值 dryMinReuse=1（rules.mjs 实测一致）
+  ok    配置默认值 maxDiffLines=400（rules.mjs 实测一致）
+  ok    配置默认值 minMutationRatio=0.8（rules.mjs 实测一致）
+  ok    版本一致: 0.1.0
+  ok    README 判据数一致: 22 = 16 机器 + 6 人工
+  ok    档位完备且互斥: process=11 · acceptance=11
+  ok    README 写明了 --profile process
+  ok    ICD 写明了档位 process
+  ok    README 写明了 --profile acceptance
+  ok    ICD 写明了档位 acceptance
+  ok    ICD 记录了全部 3 个证据键
+  ok    证据链路文件存在: tools/make-evidence.mjs
+  ok    证据链路文件存在: lib/evidence.mjs
+  ok    证据链路文件存在: evidence.config.json
+  ok    ICD 写明了证据产出器
+  ok    ICD 记录了 provenance 字段 command
+  ok    ICD 记录了 provenance 字段 exitCode
+  ok    ICD 记录了 provenance 字段 sha256
+  ok    acceptance 档含 4 条证据判据
+
+检查项 44 · 通过 44 · 漂移 0
