@@ -261,16 +261,20 @@ import { readFileSync } from 'node:fs';
 import { relative } from 'node:path';
 
 const root = process.argv[2];
+const MAX = 3;                       // ← 与 guard.config.json 的 maxNesting 保持一致
 const files = walkCode(root);
 
 const nest = new Map();
 let nestTotal = 0;
 for (const f of files) {
   const h = nestingDepth(f, readFileSync(f, 'utf8'));
-  if (h.length) {
+  // ★ 必须只数 depth > MAX。nestingDepth 返回的是"每一行的当前层级"，
+  //   不过滤会把 depth=1/2 的正常行也算进来 —— 实测差 14 倍（29542 vs 2092）。
+  const bad = h.filter((x) => x.depth > MAX);
+  if (bad.length) {
     const r = relative(root, f).replace(/\\/g, '/');
-    nest.set(r, h.length);
-    nestTotal += h.length;
+    nest.set(r, bad.length);
+    nestTotal += bad.length;
   }
 }
 
@@ -287,6 +291,10 @@ console.log('嵌套违例总数', nestTotal, '| 重复块总数', blocks.length)
 console.log('--- 重复块文件对 ---');
 [...pair.entries()].sort((a, b) => b[1] - a[1]).forEach(([k, v]) => console.log(String(v).padStart(4), k));
 ```
+
+**自证这条脚本对不对**：它的 `nestTotal` 必须与 CLI 报告里
+`KISS-C1 →  N 处超过 3 层` 的 **N 完全相等**。不相等就说明口径错了（多半就是漏了
+`depth > MAX` 过滤——这条是真踩过的坑，差 14 倍）。
 
 真实项目上的实测样例见 `docs/` 之外的基线报告；核心经验是：
 **"重复块"往往集中在中等文件之间（同族实现各写一遍），而不是在最大的文件里**——
