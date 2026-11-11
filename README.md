@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/Xu3Zhen1/sdd-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/Xu3Zhen1/sdd-guard/actions/workflows/ci.yml)
 
+> 要拿去改真实项目？先读 **[使用说明书](docs/USAGE.md)** —— 含「重构积重难返的项目」推荐路线、常见红→怎么修、已知边界。
+
 把 YAGNI / KISS / DRY 里**可机械判定**的部分，变成会 FAIL 的检查。
 零依赖，只用 Node 内置模块。
 
