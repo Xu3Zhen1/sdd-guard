@@ -207,6 +207,9 @@ MANUAL  ACCEPT-E4  未被执行的分支是否已显式报告（自曝）
 | `SKIP` | 输入不足，**没检查** | **否** |
 | `MANUAL` | 本质不可机械判定 | **否**（需人签字） |
 
+**
+eason 是全量计数，items 只是前 30 条样本**——看到 22 处 / 8 处 这种分组，那是样本内的分布，不是全量。要全量分布就用 lib/code.mjs 的同一函数自己聚合（见 §10 附注）。
+
 **报告末尾那两行是重点**：`机器实际执行 N/M` 说明有多少判据真的跑了；`⚠ N 条因输入不足从未执行` 提醒你 skip 不等于通过。
 
 退出码：`0` 机器全过 · `1` 有 fail（或 `--strict` 下有 manual）· `2` 参数/输入/证据错误。
@@ -245,6 +248,49 @@ MANUAL  ACCEPT-E4  未被执行的分支是否已显式报告（自曝）
 
 本项目自己的 CI（`.github/workflows/ci.yml`）就是这两条，矩阵 ubuntu + windows × Node 20/22/24。
 **CI 不另立标准**：如果本地绿而 CI 红，说明判据不可移植——修判据，不要给 CI 加例外。
+
+## 附注：怎么拿全量分布（存量项目专用）
+
+CLI 的 `items` 只带前 30 条样本。存量重构需要的是**按文件排序的违例数**，因为它决定先改哪个文件。
+直接 import 判定函数自己聚合，口径与 CLI 完全一致：
+
+```js
+// 放在目标仓库根跑：node baseline.mjs <代码根>
+import { walkCode, nestingDepth, duplicateBlocks } from 'file:///<sdd-guard 路径>/lib/code.mjs';
+import { readFileSync } from 'node:fs';
+import { relative } from 'node:path';
+
+const root = process.argv[2];
+const files = walkCode(root);
+
+const nest = new Map();
+let nestTotal = 0;
+for (const f of files) {
+  const h = nestingDepth(f, readFileSync(f, 'utf8'));
+  if (h.length) {
+    const r = relative(root, f).replace(/\\/g, '/');
+    nest.set(r, h.length);
+    nestTotal += h.length;
+  }
+}
+
+const blocks = duplicateBlocks(files, 6, { minChars: 40 });
+const norm = (p) => String(p).replace(/\\/g, '/');
+const pair = new Map();
+for (const b of blocks) {
+  const k = `${norm(b.a.file)} ↔ ${norm(b.b.file)}`;
+  pair.set(k, (pair.get(k) || 0) + 1);
+}
+
+console.log('嵌套违例总数', nestTotal, '| 重复块总数', blocks.length);
+[...nest.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).forEach(([k, v]) => console.log(String(v).padStart(6), k));
+console.log('--- 重复块文件对 ---');
+[...pair.entries()].sort((a, b) => b[1] - a[1]).forEach(([k, v]) => console.log(String(v).padStart(4), k));
+```
+
+真实项目上的实测样例见 `docs/` 之外的基线报告；核心经验是：
+**"重复块"往往集中在中等文件之间（同族实现各写一遍），而不是在最大的文件里**——
+所以先看 `pair` 那张表，再决定拆哪个。
 
 ## 10. 已知边界（别指望它）
 

@@ -108,7 +108,10 @@ if (FIX) {
   for (const f of toCommit) {
     const buf = readFileSync(f.abs);
     if (!buf.includes(0x0d)) continue;
-    writeFileSync(f.abs, buf.toString('utf8').replace(/\r\n/g, '\n'));
+    // 只把 \r\n 换成 \n 会漏掉"孤立 CR"（老 Mac 风格行尾、或工具截断留下的单字节 \r）。
+    // 那种文件仍被 CRLF 判据判红，但 --fix-lf 修不好 ⇒ 修与判口径不一致。
+    // 所以两个都归一：先 CRLF，再剩余 CR。
+    writeFileSync(f.abs, buf.toString('utf8').replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
     fixed.push(f.rel);
   }
   console.log(`已把 ${fixed.length} 个文件的行尾转换为 LF`);
