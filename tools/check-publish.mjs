@@ -39,15 +39,20 @@ const SECRET_PATTERNS = [
 
 const TEXT_EXT = new Set(['.mjs', '.cjs', '.js', '.json', '.md', '.yml', '.yaml', '.txt', '.ps1', '.sh', '.template', '.gitignore', '.gitattributes']);
 
-/** 本机身份：运行时推断，不写死在源码里。 */
+/**
+ * 本机身份：运行时推断，不写死在源码里（否则判据自指）。
+ * 只保留**像个人用户名**的值：含数字/下划线且长度 ≥5。
+ * 这条过滤是因为 CI 上 `USER=runner`——"runner" 会误伤 `lib/runner.mjs` 这类文件名与 import。
+ */
 function localIdentities() {
+  const looksLikeHandle = (v) => Boolean(v) && v.length >= 5 && /[0-9_]/.test(v);
   const ids = new Set();
   for (const v of [process.env.USERNAME, process.env.USER, process.env.LOGNAME]) {
-    if (v && v.length >= 3) ids.add(v);
+    if (looksLikeHandle(v)) ids.add(v);
   }
   try {
     const name = execFileSync('git', ['config', 'user.name'], { cwd: ROOT, encoding: 'utf8' }).trim();
-    if (name && name.length >= 3) ids.add(name);
+    if (looksLikeHandle(name)) ids.add(name);
   } catch {
     // 没有 git 或没配 user.name：忽略，不阻断
   }

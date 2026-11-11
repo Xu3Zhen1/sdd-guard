@@ -1,5 +1,7 @@
 # sdd-guard
 
+[![CI](https://github.com/Xu3Zhen1/sdd-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/Xu3Zhen1/sdd-guard/actions/workflows/ci.yml)
+
 把 YAGNI / KISS / DRY 里**可机械判定**的部分，变成会 FAIL 的检查。
 零依赖，只用 Node 内置模块。
 
@@ -151,6 +153,12 @@ node test/evidence.test.mjs   # 15 个用例：证据解析器（真输出吃得
 node test/mutation.mjs        # 11 个变异：证明判据真的依赖实现
 node tools/check-contract.mjs # 契约漂移检测：ICD / contract.mjs / 代码 / README 四方比对
 node tools/self-check.mjs     # ← 一条命令跑完以上全部 + 生成证据 + 跑验收（推荐）
+node tools/check-publish.mjs   # 脱敏 / LF / package.json 结构 / .gitignore 覆盖
+
+## CI 跑什么
+
+`.github/workflows/ci.yml` 在 ubuntu 与 windows、Node 20 与 22 上跑**同样两条命令**：`self-check` 与 `check-publish`。
+本地绿 ≠ CI 绿的事我们不接受——所以 CI 不重新发明规则，只是把这两条命令执行一遍；失败时上传 `.selfcheck/` 原始日志。
 ```
 
 `self-check` 是交付前唯一需要记住的命令：8 个步骤全部通过才 exit 0；任一步失败整条命令失败，原始输出留在 `.selfcheck/`。**默认对 sdd-guard 自己跑验收（自举）**：change 目录 `changes/self-host-guard/`，代码根 `lib tools cli.mjs`。

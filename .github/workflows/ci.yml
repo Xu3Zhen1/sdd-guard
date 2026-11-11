@@ -1,0 +1,58 @@
+name: CI
+
+# 判据只有被"每次都跑"才算判据。这个 workflow 只做一件事：
+# 把本地两道门禁原样搬进 CI —— 任一步非 0 即失败，不接受"先合后修"。
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: guard (${{ matrix.os }} / node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # 零依赖：没有 npm install，装依赖这一步本身就是多余的
+      - name: 环境自检
+        shell: bash
+        run: |
+          node --version
+          git --version
+          test -f package.json
+
+      # 8 步：3 个测试文件 + 变异 + 契约漂移 + 生产证据 + 证据链 + 验收档
+      - name: self-check（自举：sdd-guard 检查自己）
+        shell: bash
+        run: node tools/self-check.mjs
+
+      # 脱敏 / LF / package.json 结构 / .gitignore 覆盖
+      - name: check-publish（发布前置判据）
+        shell: bash
+        run: node tools/check-publish.mjs
+
+      # 失败时把原始输出带出来，否则"红了不知道为什么"
+      - name: 失败时上传自检日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selfcheck-logs-${{ matrix.os }}-node${{ matrix.node }}
+          path: |
+            .selfcheck/
+            .evidence-raw/
+          if-no-files-found: ignore
