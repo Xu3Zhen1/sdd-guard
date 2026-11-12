@@ -16,8 +16,9 @@
  *   { "files": [{ "path": "lib/x.mjs", "added": 10, "deleted": 2 }], "total": 12 }
  */
 import { spawnSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { resolve, dirname, join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { parseArgs } from '../lib/args.mjs';
 
@@ -34,17 +35,36 @@ import { parseArgs } from '../lib/args.mjs';
  * 不带 shell 时参数以 argv 数组直接传给进程，任何字符都不会被解释。
  * 这也是为什么本函数签名收的是数组而不是命令字符串。
  */
-function git(repo, args) {
-  const r = spawnSync('git', args, {
+/**
+ * 跑 git 并把 stdout 取回来。
+ *
+ * ★ **不捕获 stdout，改用 `git --output=<file>` 落盘再读回**（2026-11-13 实测）。
+ *
+ * 原实现用 `spawnSync(..., { encoding: 'utf8' })` 抓 stdout —— 那是 piped stdio。
+ * 在受限沙箱里 piped stdio 会直接 EPERM：
+ *
+ *     git 执行失败: spawnSync git EPERM
+ *
+ * 于是 `make-diff` 在任何沙箱化环境里**永远退 2**，而它正是
+ * `DISCIPLINE-C1`/`C3` 的唯一 diff 来源 ⇒ 这两条判据在沙箱里永远 SKIP。
+ *
+ * 修法：`git diff` 原生支持 `--output=<file>`，把结果直接写文件，
+ * 全程不经过管道。保留 `shell: false`（不要 shell —— 见上方 `^` 被吃掉的历史缺陷）。
+ *
+ * 注意 `--output` 必须放在子命令之后、且 git 只在部分子命令支持它，
+ * 因此这里按需追加，而不是无条件加。
+ */
+function git(repo, args, tmpFile) {
+  const full = tmpFile ? [...args, `--output=${tmpFile}`] : args;
+  const r = spawnSync('git', full, {
     cwd: repo,
     shell: false,
-    encoding: 'utf8',
-    // 输出量可能大：写临时文件不可行（要跨平台），用 maxBuffer 放宽到 64MB。
-    maxBuffer: 64 * 1024 * 1024,
+    stdio: 'inherit',
   });
   if (r.error) throw new Error(`git 执行失败: ${r.error.message}`);
-  if (r.status !== 0) throw new Error(`git ${args.join(' ')} 退出码 ${r.status}: ${(r.stderr || '').trim()}`);
-  return r.stdout;
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')} 退出码 ${r.status}`);
+  if (!tmpFile) return '';
+  return readFileSync(tmpFile, 'utf8');
 }
 
 function main() {
@@ -70,13 +90,22 @@ function main() {
   }
 
   let raw;
+  const tmpDir = mkdtempSync(join(tmpdir(), 'sdd-diff-'));
+  const tmpFile = join(tmpDir, 'numstat.txt');
   try {
-    raw = git(repo, gitArgs);
+    raw = git(repo, gitArgs, tmpFile);
   } catch (e) {
     console.error(String(e.message));
     console.error('');
     console.error('提示：若仓库还没有提交，先 `git add -A && git commit -m init`，或用 --range 指定基线。');
     process.exit(2);
+  } finally {
+    // 临时目录必须清掉：它落在系统 tmp 下，失败了也不该留垃圾。
+    try {
+      rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      /* 清理失败不影响结论 */
+    }
   }
 
   const files = [];
