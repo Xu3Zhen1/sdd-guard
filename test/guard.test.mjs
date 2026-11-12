@@ -1165,3 +1165,50 @@ test('DISCIPLINE-C3：无 diff / 空 diff 都必须是 skip（不假装通过）
     ws.cleanup();
   }
 });
+
+// ── C3 的取证项后门（2026-11-12 外部实测发现的第 5 个缺陷）─────────
+// RECON_HEAD 曾是整条跳过：任何声明只要句首写「确认」，就脱离 C3 管辖。
+// 五个动词都是后门。修法：取证项不要求"被改"，但引用的路径必须真实存在。
+test('DISCIPLINE-C3 负控：取证项引用不存在的路径 → 必须失败（不能靠句首动词开脱）', () => {
+  const verbs = ['确认', '检查', '记录', '复核', '查看', '实测', 'grep'];
+  for (let i = 0; i < verbs.length; i++) {
+    const verb = verbs[i];
+    const ws = makeWorkspace();
+    try {
+      // 注入一条"以取证动词开头、但引用幻觉路径"的声明
+      rmSync(join(ws.changeDir, 'tasks.md'), { force: true });
+      writeFileSync(
+        join(ws.changeDir, 'tasks.md'),
+        `# 任务\n\n- [ ] T99 ${verb} \`src/ghost-${i}.mjs\` 需要改动\n\n- [ ] T1 在 \`src/util/text.js\` 增加 normalize\n`,
+        'utf8',
+      );
+      const { byId } = run(ws, {
+        diff: { files: [{ path: 'src/util/text.js', added: 5, deleted: 1 }], total: 6 },
+      });
+      assertFails(byId, 'DISCIPLINE-C3', '取证项引用了');
+      const blob = (byId['DISCIPLINE-C3'].items || []).join(' ');
+      assert.match(blob, /ghost-/, `句首「${verb}」成了后门：幻觉路径没被拦下`);
+    } finally {
+      ws.cleanup();
+    }
+  }
+});
+
+test('DISCIPLINE-C3 正控：取证项引用真实路径 → 仍 PASS（不能误伤真实取证项）', () => {
+  const ws = makeWorkspace();
+  try {
+    // 正向夹具里存在的真实文件，用取证句式引用它
+    rmSync(join(ws.changeDir, 'tasks.md'), { force: true });
+    writeFileSync(
+      join(ws.changeDir, 'tasks.md'),
+      '# 任务\n\n- [ ] T1 确认 `src/export/handler.js` 的现状\n\n- [ ] T2 在 `src/util/text.js` 增加 normalize\n',
+      'utf8',
+    );
+    const { byId } = run(ws, {
+      diff: { files: [{ path: 'src/util/text.js', added: 5, deleted: 1 }], total: 6 },
+    });
+    assertPasses(byId, 'DISCIPLINE-C3');
+  } finally {
+    ws.cleanup();
+  }
+});
