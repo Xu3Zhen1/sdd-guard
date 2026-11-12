@@ -80,15 +80,28 @@ function run(ws, extra = {}) {
 }
 
 /** 断言某条规则失败，且原因里出现指定关键词。 */
+/**
+ * 断言某条规则失败，且**失败原因必须指向指定关键词**。
+ *
+ * ★ keyword 现在是**必填**（2026-11-12 外部实测暴露的假用例）。
+ *
+ * 历史缺陷：keyword 曾是可选。不带 keyword 时这条断言退化成
+ * 「只要 status === 'fail' 就算过」——于是**命中任何一条失败分支都算绿**。
+ * 实测案例：一条标题为「killed > 有效分母」的用例，喂的数据
+ * `killed=9 total=8 survived=[1]` 其实是 9+1≠8，先被"证据自相矛盾"拦下，
+ * 那个不可达分支**从头到尾没被执行**，用例却一直是绿的 ⇒ 覆盖率虚高。
+ *
+ * 判据：**测试数据的实际执行路径必须与标题/注释声称的一致**，
+ * 否则红和绿都不可信（红可能是"诊断红"，绿可能是"假覆盖"）。
+ */
 function assertFails(byId, id, keyword) {
+  assert.ok(keyword, `${id}: assertFails 必须给出 keyword —— 否则任何失败分支都算过，无法证明测的是目标分支`);
   const r = byId[id];
   assert.ok(r, `规则 ${id} 未出现在结果中`);
   assert.notEqual(r.status, 'skip', `${id} 被跳过了 —— 跳过不等于失败，用例无效`);
   assert.equal(r.status, 'fail', `${id} 期望 fail，实际 ${r.status}（${r.reason || r.detail || ''}）`);
-  if (keyword) {
-    const blob = `${r.reason || ''} ${(r.items || []).join(' ')}`;
-    assert.match(blob, new RegExp(keyword), `${id} 失败原因未指向「${keyword}」，实际: ${blob}`);
-  }
+  const blob = `${r.reason || ''} ${(r.items || []).join(' ')}`;
+  assert.match(blob, new RegExp(keyword), `${id} 失败原因未指向「${keyword}」，实际: ${blob}`);
 }
 
 function assertPasses(byId, id) {
@@ -1014,19 +1027,16 @@ test('ACCEPT-E2 负控：killed + survived ≠ total → 必须失败（否则�
   }
 });
 
-test('ACCEPT-E2 负控：killed > 有效分母 → 必须失败（杀死率不可能 > 1）', () => {
-  const ws = makeWorkspace();
-  try {
-    const { byId } = run(ws, {
-      cfg: { equivalentMutants: [{ id: 'S1', reason: 'x' }, { id: 'S2', reason: 'y' }] },
-      // survived 给全（自洽通过第一关），但 killed 数字本身仍然不可能
-      evidence: { mutation: { killed: 9, total: 8, survived: ['S1 a'] } },
-    });
-    assertFails(byId, 'ACCEPT-E2');
-  } finally {
-    ws.cleanup();
-  }
-});
+// ★ 已删除一条**假用例**（2026-11-12 外部实测揭发）。
+//
+// 原用例：标题「killed > 有效分母 → 必须失败」，注释称「survived 给全（自洽通过第一关）」，
+// 数据却是 killed=9 total=8 survived=[1]（9+1≠8）——它连第一关都没过，
+// 命中的是「证据自相矛盾」，那个不可达分支**从未被执行**，而用例一直是绿的。
+// 更糟的是我曾声称"已据此改写"，实际没改：**声称修了而没修，比没修更坏**。
+//
+// 现在该不可达分支由 lib/rules.mjs 的注释与穷举证据（454 组，可达 0）说明，
+// **不挂任何测试** —— 测不到的分支不该假装被测过。
+// 同时 assertFails 的 keyword 已改为必填，杜绝同类假覆盖再发生。
 
 // ── 回执第四轮：去掉 survived 短路 + 不可达分支 ───────────────
 test('ACCEPT-E2 负控：survived=[] 但 killed < total → 必须 FAIL 且准确归因「漏列」', () => {
