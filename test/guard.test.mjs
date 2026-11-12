@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { runRules, summarize } from '../lib/runner.mjs';
 import { RULES } from '../lib/rules.mjs';
 import { rulesForProfile } from '../lib/contract.mjs';
-import { extractPaths } from '../lib/rules.mjs';
+import { extractPaths, looksLikePath } from '../lib/rules.mjs';
 
 /** 判定某规则是否属于代码阶段（acceptance 档）——测试用，避免把手工 id 清单写死在用例里。 */
 function byStageIsCode(id) {
@@ -1211,4 +1211,75 @@ test('DISCIPLINE-C3 正控：取证项引用真实路径 → 仍 PASS（不能�
   } finally {
     ws.cleanup();
   }
+});
+
+// ── extractPaths 的 Unicode 支持（2026-11-12 外部实测的第 6 个缺陷）──
+// 根因：`\w` 在 JS 里只匹配 [A-Za-z0-9_]，不含任何非 ASCII 字符。
+// 后果不是"漏看一个文件"，而是整条路径完全脱离管辖。
+test('extractPaths：中文文件名 / 中文目录 + ASCII 文件 / 日文 都必须识别', () => {
+  const cases = [
+    'lib/中文路径.js',
+    'lib/ZZZ-mixed-中文.js',
+    '幽灵目录/ghost-file.js', // 中文目录 + 纯 ASCII 文件名（最容易漏想的一种）
+    '文档/note.md',
+    '日本語/ファイル.ts',
+  ];
+  for (const c of cases) {
+    assert.deepEqual(extractPaths(`\`${c}\``), [c], `Unicode 路径未被识别: ${c}`);
+  }
+  // 正控：ASCII 路径仍然正常
+  assert.deepEqual(extractPaths('`lib/ascii.js`'), ['lib/ascii.js']);
+});
+
+test('DISCIPLINE-C3 负控：中文路径不能成为盲区（B/C/D 三组注入必须 FAIL）', () => {
+  const injects = [
+    'lib/中文幽灵路径.js', // B：中文文件名
+    '幽灵目录/ghost-file.js', // C：中文目录 + ASCII 文件名
+    '文档/note.md', // 中文目录
+  ];
+  for (const p of injects) {
+    const ws = makeWorkspace();
+    try {
+      rmSync(join(ws.changeDir, 'tasks.md'), { force: true });
+      writeFileSync(
+        join(ws.changeDir, 'tasks.md'),
+        `# 任务\n\n- [ ] T99 修改 \`${p}\` 需要改动\n\n- [ ] T1 在 \`src/util/text.js\` 增加 normalize\n`,
+        'utf8',
+      );
+      const { byId } = run(ws, {
+        diff: { files: [{ path: 'src/util/text.js', added: 5, deleted: 1 }], total: 6 },
+      });
+      assertFails(byId, 'DISCIPLINE-C3', '声明了但没改');
+    } finally {
+      ws.cleanup();
+    }
+  }
+});
+
+test('DISCIPLINE-C3：未能识别的路径候选必须显式提示，不能静默消失', () => {
+  const ws = makeWorkspace();
+  try {
+    rmSync(join(ws.changeDir, 'tasks.md'), { force: true });
+    writeFileSync(
+      join(ws.changeDir, 'tasks.md'),
+      '# 任务\n\n- [ ] T98 参考 `docs/foo bar/note.txt` 的写法\n\n- [ ] T1 在 `src/util/text.js` 增加 normalize\n',
+      'utf8',
+    );
+    const { byId } = run(ws, {
+      diff: { files: [{ path: 'src/util/text.js', added: 5, deleted: 1 }], total: 6 },
+    });
+    const r = byId['DISCIPLINE-C3'];
+    // 有未校验候选时，detail 不能只说"全部落地"
+    assert.match(r.detail || '', /未校验/, '有未校验候选时仍报"全部落地"，这是在给出假肯定');
+    assert.ok((r.items || []).some((x) => /未校验/.test(x)), 'items 里没有未校验提示');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('looksLikePath：shell 命令不是路径（否则提示通道会被噪音淹没）', () => {
+  for (const cmd of ['git diff -- lib/client.js', 'node --check lib/a.js lib/b.js']) {
+    assert.equal(looksLikePath(cmd), false, `命令被误判为路径: ${cmd}`);
+  }
+  assert.equal(looksLikePath('docs/foo bar/note.txt'), true);
 });
