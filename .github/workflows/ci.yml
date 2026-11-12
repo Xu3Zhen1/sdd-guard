@@ -46,6 +46,29 @@ jobs:
         shell: bash
         run: node tools/check-publish.mjs
 
+      # ★ 覆盖率守卫的自证：空 change 目录必须因此判红。
+      # 为什么单独一步：`--min-coverage` 默认关闭（避免打断"边写边查"），
+      # 所以必须有一步证明"打开它之后真的能拦住空提交"，
+      # 否则这个守卫本身又是个没被验证过的死代码。
+      - name: 覆盖率守卫负控（空 change 必须判红）
+        shell: bash
+        run: |
+          set -e
+          TMP="$RUNNER_TEMP/empty-guard"
+          rm -rf "$TMP"; mkdir -p "$TMP/changes/empty-one"
+          echo '{"maxNesting":3,"dupWindow":6,"dupMinChars":40,"yagniMinNonGoals":3,"dryMinReuse":1}' > "$TMP/guard.config.json"
+          # 不开启时：退出码 0（保持既有语义）
+          node cli.mjs check --change "$TMP/changes/empty-one" --repo "$TMP" \
+            --config "$TMP/guard.config.json" > /dev/null 2>&1
+          echo "未开启守卫 ⇒ exit 0（符合预期）"
+          # 开启时：必须非 0
+          if node cli.mjs check --change "$TMP/changes/empty-one" --repo "$TMP" \
+               --config "$TMP/guard.config.json" --min-coverage 0.8 > /dev/null 2>&1; then
+            echo "::error::空 change 目录在 --min-coverage 0.8 下仍被放行（exit 0）——守卫失效"
+            exit 1
+          fi
+          echo "开启守卫 ⇒ 非 0（负控成立）"
+
       # 失败时把原始输出带出来，否则"红了不知道为什么"
       - name: 失败时上传自检日志
         if: failure()

@@ -120,7 +120,44 @@ function main() {
   }
 
   const hardFail = summary.fail > 0 || (args.strict && summary.manual > 0);
-  process.exit(hardFail ? EXIT.FAIL : EXIT.OK);
+
+  /**
+   * 覆盖率守卫（2026-11-12 外部实测发现的缺口）。
+   *
+   * 缺口形态：change 目录里**什么都没写**时，13 条机器规则全 SKIP，
+   * 汇总报「通过 0 · 失败 0 · 跳过 13」，而硬失败只看 `fail > 0`
+   * ⇒ **退出码 0 ⇒ CI 放行空提交**。
+   *
+   * 实测确认：空 change 目录 → 通过 1(仅 DISCIPLINE-C2)· 失败 0 · 跳过 16 · **EXIT=0**。
+   * 「一个空的 change 目录在 CI 里算通过」——这比任何单条规则的缺陷都严重。
+   *
+   * 为什么默认不启用（`--min-coverage` 缺省关闭）：
+   * `process` 档的用法是"边写边查"，文档没写完就 skip 是合理的，
+   * 判 fail 会打断正常流程。所以这是一个**显式选择**：
+   * 想用它守 CI 的人自己加参数，不想被打断的人什么都不用改。
+   * 这是「不改变既有语义的选项」，不是"又一处静默跳过"。
+   */
+  let coverageFail = false;
+  if (args['min-coverage'] !== undefined) {
+    const min = Number(args['min-coverage']);
+    if (!Number.isFinite(min) || min < 0 || min > 1) {
+      console.error(`--min-coverage 需为 0..1 的数字，收到: ${args['min-coverage']}`);
+      process.exit(EXIT.CONFIG);
+    }
+    const ratio = summary.machineTotal > 0 ? summary.covered / summary.machineTotal : 0;
+    if (ratio < min) {
+      coverageFail = true;
+      console.error(
+        `机器规则覆盖率 ${summary.covered}/${summary.machineTotal} = ${ratio.toFixed(2)} < 下限 ${min}`,
+      );
+      console.error(
+        '覆盖率不足意味着「没检查」，不等于「检查了没问题」。' +
+          '请补全 changes/<id>/ 下的 proposal/design/tasks/specs 与 --code 目录。',
+      );
+    }
+  }
+
+  process.exit(hardFail || coverageFail ? EXIT.FAIL : EXIT.OK);
 }
 
 main();

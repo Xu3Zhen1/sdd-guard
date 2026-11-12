@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { parseArgs, REPEATABLE_KEYS } from '../lib/args.mjs';
 import { resolveOnly } from '../lib/runner.mjs';
 import { RULES } from '../lib/rules.mjs';
+import { OPTIONS } from '../lib/contract.mjs';
 
 test('--code 可重复出现并累积为数组（HELP 里写着「可重复」，必须真支持）', () => {
   const a = parseArgs(['check', '--change', 'c', '--code', 'src', '--code', 'lib', '--code', 'pkg']);
@@ -67,4 +68,18 @@ test('不传 --only ⇒ 选中全部规则，unknown 为空', () => {
   assert.equal(selected.length, RULES.length);
   assert.ok(selected.length > 0, '规则集非空');
   assert.deepEqual(unknown, []);
+});
+// ── --min-coverage：机器规则覆盖率下限（2026-11-12 外部实测的缺口）──
+// 缺口形态：空 change 目录 → 通过 0 · 失败 0 · 跳过 13，而硬失败只看 fail>0
+// ⇒ 退出码 0 ⇒ CI 放行空提交。实测确认过（EXIT=0）。
+test('--min-coverage 出现在 OPTIONS 里且声明了取值范围', () => {
+  const opt = OPTIONS.find((o) => o.key === 'min-coverage');
+  assert.ok(opt, '--min-coverage 未登记在 OPTIONS（--help 里不会有它）');
+  assert.equal(opt.value, '<0..1>');
+  assert.match(opt.desc, /覆盖率/);
+});
+
+test('--min-coverage 能正确解析出数值字符串', () => {
+  const args = parseArgs(['check', '--min-coverage', '0.8']);
+  assert.equal(args['min-coverage'], '0.8');
 });
