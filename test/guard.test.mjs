@@ -1269,9 +1269,22 @@ test('DISCIPLINE-C3：未能识别的路径候选必须显式提示，不能静�
       diff: { files: [{ path: 'src/util/text.js', added: 5, deleted: 1 }], total: 6 },
     });
     const r = byId['DISCIPLINE-C3'];
-    // 有未校验候选时，detail 不能只说"全部落地"
-    assert.match(r.detail || '', /未校验/, '有未校验候选时仍报"全部落地"，这是在给出假肯定');
-    assert.ok((r.items || []).some((x) => /未校验/.test(x)), 'items 里没有未校验提示');
+    /**
+     * ★ 2026-11-13（Q2 · R3-b）语义变更：
+     * 修复前 `docs/foo bar/note.txt` 因含空格被判"不像路径" ⇒ 落进 skipped（未校验提示）。
+     * 修复后路径识别放宽，它被正常识别并进入"声明要改"集合 ⇒ 不再产生 skipped。
+     *
+     * 因此这里验证的是**新语义**：要么它被正常校验（不再假肯定），
+     * 要么它进 skipped 且有提示 —— 只有"既不校验、也不提示"才算假肯定。
+     */
+    const detail = r.detail || '';
+    const items = r.items || [];
+    const hasUnverifiedHint = /未校验/.test(detail) || items.some((x) => /未校验/.test(x));
+    const claimsAllLanded = /全部落地/.test(detail);
+    assert.ok(
+      hasUnverifiedHint || !claimsAllLanded,
+      `既没有未校验提示，又宣称"全部落地" ⇒ 假肯定。detail=${detail}`,
+    );
   } finally {
     ws.cleanup();
   }

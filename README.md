@@ -111,6 +111,23 @@ node cli.mjs check \
 | DISCIPLINE-C1 | 纪律 | 变更落在 `allowedPrefixes` 内，且总行数 ≤ `maxDiffLines` |
 | DISCIPLINE-C2 | 纪律 | **仓库根不得堆积临时产物**（`pip-*` / 随机 `tmp*` / `cdp-profile-*` / `diag-*`） |
 | DISCIPLINE-C3 | 纪律 | **文档声明的文件必须出现在实际变更里**（文档↔代码绑定） |
+
+> **⚠️ 2026-11-13 破坏性变更：`codeScopes` 默认改为「全查」**
+>
+> `DISCIPLINE-C3` 的反向检查（"改了但文档没提"）原先只覆盖
+> `lib/ src/ app/ packages/` 四个目录。2026-11-13 的对抗性实测
+> （评审包 §5 Q1 · R6）证实：把代码放在 `tools/`、`scripts/`、`bin/`
+> 的项目，这部分检查**整段失效** —— 与历史上「Unicode 路径整条脱离管辖」同族。
+>
+> 现在默认 `codeScopes = []`，即 **所有目录都参与反向检查**。
+> 若你的项目确实有不该纳入的目录，请在 `guard.config.json` 里显式写：
+>
+> ```json
+> { "codeScopes": ["src/", "lib/"] }
+> ```
+>
+> 升级后如果你的项目首次出现大量「改了但文档没提」，那不是新 bug ——
+> 是原先被静默跳过的问题现在被看见了。
 | KISS-C2 | KISS | *MANUAL* 现有依赖能否替代新增抽象 |
 
 ### 前后端解耦（DECOUPLING）

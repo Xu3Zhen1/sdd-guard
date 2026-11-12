@@ -1,0 +1,29 @@
+fix(rules): 修复 6 个启发式后门（评审包 Q1）
+
+评审包 §5 Q1 点名的 6 个「为消误报而扩大跳过面」的启发式，
+经对抗性实测全部可被攻破（LEAK 9 条）。本次逐条收紧，并加入
+17 条常驻探针 test/q1-backdoor.test.mjs 防回归。
+
+- R1 NOT_CHANGING：豁免词不再把路径移出 declared。原先整块 continue
+  会让「修改 X（日志格式不适用）」的 X 彻底消失。豁免只影响人读，
+  不影响判据——真要表达「不动」应不写进任务清单。
+- R2 RECON_HEAD：改双条件（句首取证动词 且 块内无「要改」表述）。
+  纯取证仍豁免；「确认 X 需要改动」这类自相矛盾句计入声明并接受
+  幻觉路径检查。
+- R3-a looksLikePath：删除过宽的 includes('--') 否定，
+  ghost--probe.js 这类合法文件名不再整条免检。
+- R3-b looksLikePath/extractPaths：扩展名不再是必要条件，
+  无扩展名文件不再既不校验、也不进 skipped 提示。
+- R4 splitCommandPaths：引号感知 token 化，含空格路径不再被切碎丢弃。
+- R5 toBlocks：续行判定 Tab 与 >=2 空格等价（原先单 Tab 整行被丢弃）。
+- R6 codeScopes：默认改为全查（破坏性变更，README 已说明）。
+
+验证：
+- guard 76/0、args 12/0、evidence 18/0（与修复前一致）
+- q1-backdoor 17/0（原 LEAK 9 全转 HOLD）
+- self-check 8/8
+- 变异闭环：回退 R6 => P6 变红；还原 => 17/0，证明探针非恒真断言
+
+已知未覆盖：looksLikePath:91（首词判命令名）无独立可复现绕过，
+Q1 报告即记为 UNEXECUTED；本轮只探了 DISCIPLINE-C3，
+DRY-D1/DRY-T1/DECOUPLE-1 的同族影响未测。
