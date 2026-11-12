@@ -1027,3 +1027,52 @@ test('ACCEPT-E2 负控：killed > 有效分母 → 必须失败（杀死率不�
     ws.cleanup();
   }
 });
+
+// ── 回执第四轮：去掉 survived 短路 + 不可达分支 ───────────────
+test('ACCEPT-E2 负控：survived=[] 但 killed < total → 必须 FAIL 且准确归因「漏列」', () => {
+  const ws = makeWorkspace();
+  try {
+    // 去掉短路后才能抓住这一格。旧实现（survived.length && ...）在这里会漏校验。
+    const { byId } = run(ws, { evidence: { mutation: { killed: 6, total: 8, survived: [] } } });
+    assertFails(byId, 'ACCEPT-E2', '自相矛盾');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('ACCEPT-E2 负控：漏列 + 同时声明了豁免 → 归因必须是「漏列」而不是「理由过时」', () => {
+  const ws = makeWorkspace();
+  try {
+    // 这是外部实测指出的误导场景：若漏列不被抓住，报告会说
+    // 「声明但未存活（理由可能已过时）: S1」，用户于是删掉一个合理的豁免。
+    const { byId } = run(ws, {
+      cfg: { equivalentMutants: [{ id: 'S1', reason: '合理理由' }] },
+      evidence: { mutation: { killed: 6, total: 8, survived: [] } },
+    });
+    assertFails(byId, 'ACCEPT-E2', '自相矛盾');
+    const blob = `${byId['ACCEPT-E2'].reason || ''} ${(byId['ACCEPT-E2'].items || []).join(' ')}`;
+    assert.ok(!/理由可能已过时/.test(blob), '归因错了：应指向"漏列"，不应把责任推给豁免声明');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('ACCEPT-E2 正控：全杀且 survived 为空（8/8）→ 仍 PASS，不被自洽校验误伤', () => {
+  const ws = makeWorkspace();
+  try {
+    const { byId } = run(ws, { evidence: { mutation: { killed: 8, total: 8, survived: [] } } });
+    assertPasses(byId, 'ACCEPT-E2');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('ACCEPT-E2 负控：survived 多列（killed + survived > total）→ 必须 FAIL', () => {
+  const ws = makeWorkspace();
+  try {
+    const { byId } = run(ws, { evidence: { mutation: { killed: 8, total: 8, survived: ['a 甲', 'b 乙'] } } });
+    assertFails(byId, 'ACCEPT-E2', '自相矛盾');
+  } finally {
+    ws.cleanup();
+  }
+});
