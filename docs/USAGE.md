@@ -1,11 +1,11 @@
 # 使用说明书
 
-> 面向"要拿它去改真实代码"的人。10 分钟读完，够用。
-> 设计取舍与内部结构见 [README.md](./README.md) 与 [docs/ICD.md](./docs/ICD.md)。
+> 面向"要拿它去改真实代码"的人。**前 10 分钟读第 1–3 节就能开始跑**；其余按需查。
+> 设计取舍与内部结构见 [README.md](../README.md) 与 [ICD.md](./ICD.md)；判据依据见 [DESIGN-RATIONALE.md](./DESIGN-RATIONALE.md)。
 
 ## 1. 它是什么 / 不是什么
 
-**是**：一个**判据执行器**。你把"这次变更"写成四个制品（proposal / specs / design / tasks），它检查这些制品与对应代码是否满足 22 条判据（16 条机器判定、6 条必须人工签字），并打印**机器实际执行了几条**。
+**是**：一个**判据执行器**。你把"这次变更"写成四个制品（proposal / specs / design / tasks），它检查这些制品与对应代码是否满足 23 条判据（17 条机器判定、6 条必须人工签字），并打印**机器实际执行了几条**。
 
 **不是**：
 
@@ -18,19 +18,24 @@
 
 **一句话**：它把"说好的事"变成"会红的判据"。判断对不对仍需人；它负责让"没做到"无法被说成"做到了"。
 
-## 2. 三条命令（先跑起来）
+## 2. 10 分钟最小可用路径（先跑起来）
 
 ```bash
-# ① 自检：项目自己是否健康（8 步，含变异与契约漂移）
-node tools/self-check.mjs
+# 1) 建一个 change
+mkdir -p changes/first-cut
+# 写 proposal.md（含非目标表）、specs/x/spec.md、design.md、tasks.md
+# 模板：templates/proposal.md / templates/specs/spec.md / templates/design.md / templates/tasks.md
 
-# ② 开发流程：检查四制品形态（写作阶段反复跑）
-node cli.mjs check --change changes/<名字> --profile process --repo . --config guard.config.json
+# 2) 写作阶段反复跑（四制品形态）
+node cli.mjs check --change changes/first-cut --profile process --repo . --config guard.config.json
 
-# ③ 验收标准：代码级判据 + 外部证据（交付前跑一次）
+# 3) 交付前：先产出外部证据，再跑验收档
 node tools/make-evidence.mjs --out evidence.json
-node cli.mjs check --change changes/<名字> --profile acceptance --evidence evidence.json \
+node cli.mjs check --change changes/first-cut --profile acceptance --evidence evidence.json \
   --repo . --config guard.config.json --code src
+
+# 4) 一键自检（8 步：含变异与契约漂移，等价于 CI 跑的东西）
+node tools/self-check.mjs
 ```
 
 不带 `--profile` 时等价 `--profile all`（两档一起跑）。
@@ -252,8 +257,15 @@ eason 是全量计数，items 只是前 30 条样本**——看到 22 处 / 8 �
 本项目自己的 CI（`.github/workflows/ci.yml`）就是这两条，矩阵 ubuntu + windows × Node 20/22/24。
 **CI 不另立标准**：如果本地绿而 CI 红，说明判据不可移植——修判据，不要给 CI 加例外。
 
-## 附注：怎么拿全量分布（存量项目专用）
+## 10. 已知边界（别指望它）
 
+- 无 AST：`DRY-C1` 是行级窗口，改变量名即可绕过；`KISS-C1` 是花括号/缩进启发式。
+- `DECOUPLE-2` 不展开 tsconfig 路径别名（`@shared/*` 靠 `boundaries` 前缀匹配）。
+- 6 条 `MANUAL` 永远不在机器判定内，需要人或 `signoff` 流程（尚未实现，ICD §7 TBD）。
+- 无"豁免"机制（自由文本除外）；无基线棘轮；无增量扫描缓存。
+- 只在 Windows + Node 20/22/24 实测过（CI 另跑 ubuntu）。
+
+## 附录 A：怎么拿全量分布（存量项目专用）
 CLI 的 `items` 只带前 30 条样本。存量重构需要的是**按文件排序的违例数**，因为它决定先改哪个文件。
 直接 import 判定函数自己聚合，口径与 CLI 完全一致：
 
@@ -302,26 +314,3 @@ console.log('--- 重复块文件对 ---');
 真实项目上的实测样例见 `docs/` 之外的基线报告；核心经验是：
 **"重复块"往往集中在中等文件之间（同族实现各写一遍），而不是在最大的文件里**——
 所以先看 `pair` 那张表，再决定拆哪个。
-
-## 10. 已知边界（别指望它）
-
-- 无 AST：`DRY-C1` 是行级窗口，改变量名即可绕过；`KISS-C1` 是花括号/缩进启发式。
-- `DECOUPLE-2` 不展开 tsconfig 路径别名（`@shared/*` 靠 `boundaries` 前缀匹配）。
-- 4 条 `MANUAL` 永远不在机器判定内，需要人或 `signoff` 流程（尚未实现，ICD §7 TBD）。
-- 无"豁免"机制（自由文本除外）；无基线棘轮；无增量扫描缓存。
-- 只在 Windows + Node 20/22/24 实测过（CI 另跑 ubuntu）。
-
-## 11. 10 分钟最小可用路径
-
-```bash
-# 1) 建一个 change
-mkdir -p changes/first-cut
-# 写 proposal.md（含非目标表）、specs/x/spec.md、design.md、tasks.md
-# 模板：templates/proposal.md / templates/specs/spec.md / templates/design.md / templates/tasks.md
-
-# 2) 开发和写完都跑
-node cli.mjs check --change changes/first-cut --profile process --repo . --config guard.config.json
-
-# 3) 交付前一键
-node tools/self-check.mjs
-```

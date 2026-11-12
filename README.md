@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Xu3Zhen1/sdd-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/Xu3Zhen1/sdd-guard/actions/workflows/ci.yml)
 
-> 要拿去改真实项目？先读 **[使用说明书](docs/USAGE.md)** —— 含「重构积重难返的项目」推荐路线、常见红→怎么修、已知边界。
+> 要拿去改真实项目？先读 **[使用说明书](docs/USAGE.md)** —— 第 2 节是 10 分钟最小可用路径，往后是配置填写、看报告、常见红→怎么修、接 CI、已知边界；存量项目的重构路线在第 3 节。
 >
 > 想知道**每条判据凭什么认为自己是对的**？读 **[设计说明与判据依据](docs/DESIGN-RATIONALE.md)** —— 含九轮对抗性实测挖出的缺陷、四态为何优于二态、开关可关闭性的三档判据、方法可迁移性分析，以及一张**已知未验证项**表。
 
