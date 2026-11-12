@@ -1,9 +1,9 @@
 # Q1 启发式后门探测报告
 
-- 项目：sdd-guard（子项目身份 `sdd-guard`，工作区 `F:\DSH\AIcode`）
-- 任务来源：评审包 `F:\DSH\AIcode\_diag\sdd-guard-评审包-20261112.md` §4 模式 C / §5 Q1
+- 项目：sdd-guard（工作区子项目 `sdd-guard`）
+- 任务来源：评审包（工作区根 `_diag/sdd-guard-评审包-20261112.md`）§4 模式 C / §5 Q1
 - 探针脚本：`test/q1-backdoor.test.mjs`（17 用例，`node test\q1-backdoor.test.mjs` → 17 passed / 0 fail）
-- 夹具：`test/fixtures/q1-base/`（7 个文件，全部为构造的假项目，不落在 `F:\DSH\AIcode` 根）
+- 夹具：`test/fixtures/q1-base/`（7 个文件，全部为构造的假项目，不落在仓库根）
 - 被测对象：`lib/rules.mjs` 中 `DISCIPLINE-C3` 及其三个辅助函数 `looksLikePath` / `splitCommandPaths` / `toBlocks`
 - 本轮**未修改** `lib/`、其他测试、README、AGENTS.md；未 commit / push。`git status` 仅 3 项新增：`_work/`、`test/fixtures/q1-base/`、`test/q1-backdoor.test.mjs`。
 
