@@ -1283,3 +1283,61 @@ test('looksLikePath：shell 命令不是路径（否则提示通道会被噪音�
   }
   assert.equal(looksLikePath('docs/foo bar/note.txt'), true);
 });
+
+// ── 第 7 缺陷：整篇级跳过（未闭合反引号）─────────────────────────
+// 比前六个都危险：C3 什么都没做，却报了肯定结论。
+test('DISCIPLINE-C3 负控：反引号奇数 ⇒ 必须失败（不能整篇跳过）', () => {
+  const ws = makeWorkspace();
+  try {
+    const orig = ws.readArt('tasks.md');
+    // 只删一个右引号：改 1 个字符
+    const broken = orig.replace(/`([^`\n]+)`/, '`$1');
+    rmSync(join(ws.changeDir, 'tasks.md'), { force: true });
+    writeFileSync(join(ws.changeDir, 'tasks.md'), broken, 'utf8');
+    const { byId } = run(ws, {
+      diff: { files: [{ path: 'src/export/handler.js', added: 5, deleted: 1 }], total: 6 },
+    });
+    assertFails(byId, 'DISCIPLINE-C3', '反引号未闭合');
+    // 反向断言：不能仍然说"全部落地"
+    assert.ok(!/全部落地/.test(byId['DISCIPLINE-C3'].detail || ''), '未闭合时仍报"全部落地"');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('DISCIPLINE-C3 负控：命令行里的幽灵路径必须被抓（不能绕过校验）', () => {
+  const cmds = [
+    'node tools/ZZZ-ghost-cmd.mjs --x',
+    'git diff -- lib/ZZZ-ghost-cmd.js',
+  ];
+  for (const cmd of cmds) {
+    const ws = makeWorkspace();
+    try {
+      const orig = ws.readArt('tasks.md');
+      rmSync(join(ws.changeDir, 'tasks.md'), { force: true });
+      writeFileSync(join(ws.changeDir, 'tasks.md'), `${orig}\n- [ ] T99 运行 \`${cmd}\`\n`, 'utf8');
+      const { byId } = run(ws, {
+        diff: { files: [{ path: 'src/export/handler.js', added: 5, deleted: 1 }], total: 6 },
+      });
+      assertFails(byId, 'DISCIPLINE-C3', '不存在的路径');
+    } finally {
+      ws.cleanup();
+    }
+  }
+});
+
+test('DISCIPLINE-C3 正控：命令行引用**真实存在**的工具不算"声明要改"', () => {
+  const ws = makeWorkspace();
+  try {
+    // 夹具里 tasks.md 的 T4 就是 `node --test test/handler.test.js`
+    // 该文件真实存在 ⇒ 不该被报"声明了但没改"
+    const { byId } = run(ws, {
+      diff: { files: [{ path: 'src/export/handler.js', added: 5, deleted: 1 }], total: 6 },
+    });
+    const r = byId['DISCIPLINE-C3'];
+    const items = (r.items || []).join(' ');
+    assert.ok(!/test\/handler\.test\.js/.test(items), `命令行的真实工具被误报: ${items}`);
+  } finally {
+    ws.cleanup();
+  }
+});
