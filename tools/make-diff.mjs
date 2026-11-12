@@ -21,10 +21,23 @@ import { resolve, dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { parseArgs } from '../lib/args.mjs';
 
+/**
+ * 执行 git。
+ *
+ * ★ **不要加 `shell: true`**（2026-11-12 在真实仓库上踩到）。
+ *
+ * 带 shell 时参数会先经过 cmd.exe（Windows）/ sh（POSIX）解析，而
+ * **`^` 在 cmd 里是转义符**：`--range "HEAD^..HEAD"` 里的 `^` 被吃掉，
+ * git 收到的是 `HEAD..HEAD` —— 于是 diff 恒为空、退出码 0、**静默给出空结果**。
+ * 这类失败最危险：不报错，只是答案永远是"没有变更"。
+ *
+ * 不带 shell 时参数以 argv 数组直接传给进程，任何字符都不会被解释。
+ * 这也是为什么本函数签名收的是数组而不是命令字符串。
+ */
 function git(repo, args) {
   const r = spawnSync('git', args, {
     cwd: repo,
-    shell: true,
+    shell: false,
     encoding: 'utf8',
     // 输出量可能大：写临时文件不可行（要跨平台），用 maxBuffer 放宽到 64MB。
     maxBuffer: 64 * 1024 * 1024,

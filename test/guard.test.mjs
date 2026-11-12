@@ -1139,3 +1139,29 @@ test('审计：ACCEPT-E2 的 fail 分支中，除已声明不可达者外，每�
     ws.cleanup();
   }
 });
+
+// ── C3 的真实形态回归（2026-11-12 在 8 个切片上回放后固化）─────────
+// 这些用例都来自真实 change 目录的原文，不是构造的。
+test('DISCIPLINE-C3：取证句式（句首「确认/检查」）不参与正向声明', () => {
+  const ws = makeWorkspace();
+  try {
+    const { byId } = run(ws, {
+      diff: { files: [{ path: 'src/other.mjs', added: 5, deleted: 1 }], total: 6 },
+    });
+    // 真实原文：`- [ ] T4 在 \`lib/x.js\` 末尾增加 export（实现不动）`
+    // 「实现不动」修饰的是实现，不是"这个文件不动" —— 它必须仍被算作声明。
+    assert.equal(byId['DISCIPLINE-C3'].status, 'fail');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('DISCIPLINE-C3：无 diff / 空 diff 都必须是 skip（不假装通过）', () => {
+  const ws = makeWorkspace();
+  try {
+    assert.equal(run(ws, { diff: null }).byId['DISCIPLINE-C3'].status, 'skip');
+    assert.equal(run(ws, { diff: { files: [], total: 0 } }).byId['DISCIPLINE-C3'].status, 'skip');
+  } finally {
+    ws.cleanup();
+  }
+});
