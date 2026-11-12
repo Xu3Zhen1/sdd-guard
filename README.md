@@ -3,6 +3,8 @@
 [![CI](https://github.com/Xu3Zhen1/sdd-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/Xu3Zhen1/sdd-guard/actions/workflows/ci.yml)
 
 > 要拿去改真实项目？先读 **[使用说明书](docs/USAGE.md)** —— 含「重构积重难返的项目」推荐路线、常见红→怎么修、已知边界。
+>
+> 想知道**每条判据凭什么认为自己是对的**？读 **[设计说明与判据依据](docs/DESIGN-RATIONALE.md)** —— 含九轮对抗性实测挖出的缺陷、四态为何优于二态、开关可关闭性的三档判据、方法可迁移性分析，以及一张**已知未验证项**表。
 
 把 YAGNI / KISS / DRY 里**可机械判定**的部分，变成会 FAIL 的检查。
 零依赖，只用 Node 内置模块。
