@@ -1086,3 +1086,56 @@ test('ACCEPT-E2 负控：survived 多列（killed + survived > total）→ 必�
     ws.cleanup();
   }
 });
+
+// ── 结构审计：ACCEPT-E2 的每个 fail 分支都必须「可达或有明确不可达声明」──
+// 2026-11-12：这条审计的由来是一条假用例——标题声称测某个分支，
+// 实际被更早的分支拦下。核对方式不是看颜色，是**看实际命中的 reason 文案**。
+test('审计：ACCEPT-E2 的 fail 分支中，除已声明不可达者外，每条都必须有用例能命中', () => {
+  const base = { maxNesting: 3, dupWindow: 6, dupMinChars: 40, yagniMinNonGoals: 3, dryMinReuse: 1 };
+  const go = (extraCfg, ev) => {
+    const { results } = runRules({
+      changeDir: ws.changeDir,
+      repo: ws.root,
+      cwd: ws.root,
+      cfg: { ...base, ...extraCfg },
+      codeRoots: [join(ws.root, 'src')],
+      diff: null,
+      evidence: { mutation: ev },
+    });
+    return results.find((r) => r.id === 'ACCEPT-E2');
+  };
+  const ws = makeWorkspace();
+  try {
+    // 每条：期望命中的 reason 片段 + 触发它的数据
+    const reachable = [
+      ['killed/total 不是数字', { killed: 'x', total: 8 }],
+      ['total=0', { killed: 0, total: 0 }],
+      ['不是非空字符串', { killed: 6, total: 8, survived: ['S1 a', 'S2 b'] }, { equivalentMutants: [{ id: 'S1', reason: {} }] }],
+      ['自相矛盾', { killed: 6, total: 8, survived: ['S1 a'] }],
+      ['分母为 0', { killed: 0, total: 2, survived: ['S1 a', 'S2 b'] }, { equivalentMutants: [{ id: 'S1', reason: 'x' }, { id: 'S2', reason: 'y' }] }],
+      ['杀死率', { killed: 6, total: 8, survived: ['S1 a', 'S2 b'] }],
+    ];
+    for (const [needle, ev, cfg] of reachable) {
+      const r = go(cfg || {}, ev);
+      assert.equal(r.status, 'fail', `分支「${needle}」未触发失败`);
+      assert.match(r.reason || '', new RegExp(needle), `分支「${needle}」实际命中: ${r.reason}`);
+    }
+
+    // 已声明不可达的分支：穷举验证它确实到不了（不是"没测"，是"测不到"）
+    let invariantHits = 0;
+    for (let total = 1; total <= 10; total++) {
+      for (let svLen = 0; svLen <= total; svLen++) {
+        const killed = total - svLen;
+        const survived = Array.from({ length: svLen }, (_, i) => `X${i + 1} d`);
+        for (let hit = 0; hit <= svLen; hit++) {
+          const eq = survived.slice(0, hit).map((s) => ({ id: s.split(' ')[0], reason: 'r' }));
+          const r = go({ equivalentMutants: eq }, { killed, total, survived });
+          if (/内部不变量被破坏/.test(r.reason || '')) invariantHits++;
+        }
+      }
+    }
+    assert.equal(invariantHits, 0, '「内部不变量被破坏」分支竟然可达 —— 说明代数推导有误，需重新审视');
+  } finally {
+    ws.cleanup();
+  }
+});
