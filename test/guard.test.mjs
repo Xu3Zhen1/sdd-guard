@@ -755,7 +755,7 @@ test('ACCEPT-E2 负控：total=0（没有变异体）→ 必须失败', () => {
 test('ACCEPT-E2 负控：杀死率不足 → 必须失败并回显存活项', () => {
   const ws = makeWorkspace();
   try {
-    const { byId } = run(ws, { evidence: { mutation: { killed: 5, total: 11, survived: ['M7 跨文件重复检测失效'] } } });
+    const { byId } = run(ws, { evidence: { mutation: { killed: 5, total: 11, survived: ['M7 跨文件重复检测失效', 'M8 存活乙', 'M9 存活丙', 'M10 存活丁', 'M11 存活戊', 'M12 存活己'] } } });
     assertFails(byId, 'ACCEPT-E2', '0.45');
     assert.ok((byId['ACCEPT-E2'].items || []).some((s) => s.includes('M7')), '未回显存活变异体');
   } finally {
@@ -768,7 +768,7 @@ test('ACCEPT-E2 正控：声明等价变异后从分母扣除 → 由红转绿',
   const ws = makeWorkspace();
   try {
     // 10/14 = 0.71 < 0.8 ⇒ 红；扣除 2 个等价变异后 10/12 = 0.83 ⇒ 绿
-    const mutation = { killed: 10, total: 14, survived: ['E1 恒真', 'E2 仅引用不同'] };
+    const mutation = { killed: 10, total: 14, survived: ['E1 恒真', 'E2 仅引用不同', 'E3 存活丙', 'E4 存活丁'] };
     const before = run(ws, { evidence: { mutation } }).byId;
     assertFails(before, 'ACCEPT-E2', '0.71');
 
@@ -970,6 +970,59 @@ test('ACCEPT-E2 正控：合法字符串 reason 仍能正常豁免（类型收�
     });
     assertPasses(byId, 'ACCEPT-E2');
     assert.match(byId['ACCEPT-E2'].detail || '', /扣除等价变异 4 个/);
+  } finally {
+    ws.cleanup();
+  }
+});
+
+// ── 回执第三轮：重复声明提示 + 证据自洽性 ─────────────────────
+test('ACCEPT-E2：重复声明（去空白后同名）必须提示「已合并」，不能静默', () => {
+  const ws = makeWorkspace();
+  try {
+    const { byId } = run(ws, {
+      cfg: {
+        equivalentMutants: [
+          { id: 'S1', reason: '甲' },
+          { id: 'S1 ', reason: '乙' },   // trim 后与上一条同名
+        ],
+      },
+      evidence: { mutation: { killed: 6, total: 8, survived: ['S1 a', 'S2 b'] } },
+    });
+    assertPasses(byId, 'ACCEPT-E2');
+    const blob = `${byId['ACCEPT-E2'].detail || ''}`;
+    assert.match(blob, /重复声明已合并 1 条/, '重复声明被静默合并了 —— 用户会以为自己豁免了 2 个');
+    // 分母只扣真实命中的 1 个：6/(8-1)=0.86，不是 6/(8-2)=1.00
+    assert.match(blob, /6\/7/);
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('ACCEPT-E2 负控：killed + survived ≠ total → 必须失败（否则能算出杀死率 > 1）', () => {
+  const ws = makeWorkspace();
+  try {
+    // 不校验时：killed=7 total=8 survived=2，扣掉 2 个等价变异 → 7/6 = 1.17 静默 PASS
+    const { byId } = run(ws, {
+      cfg: { equivalentMutants: [{ id: 'S1', reason: 'x' }, { id: 'S2', reason: 'y' }] },
+      evidence: { mutation: { killed: 7, total: 8, survived: ['S1 a', 'S2 b'] } },
+    });
+    assertFails(byId, 'ACCEPT-E2', '自相矛盾');
+    const blob = `${byId['ACCEPT-E2'].reason || ''}`;
+    assert.match(blob, /killed\(7\) \+ survived\(2\) = 9 ≠ total\(8\)/);
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('ACCEPT-E2 负控：killed > 有效分母 → 必须失败（杀死率不可能 > 1）', () => {
+  const ws = makeWorkspace();
+  try {
+    const { byId } = run(ws, {
+      cfg: { equivalentMutants: [{ id: 'S1', reason: 'x' }, { id: 'S2', reason: 'y' }] },
+      // survived 给全（自洽通过第一关），但 killed 数字本身仍然不可能
+      evidence: { mutation: { killed: 9, total: 8, survived: ['S1 a'] } },
+    });
+    assertFails(byId, 'ACCEPT-E2');
   } finally {
     ws.cleanup();
   }
