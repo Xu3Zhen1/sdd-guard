@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // sdd-guard —— 把 YAGNI/KISS/DRY 里可机械判定的部分变成会 FAIL 的检查。
-// 退出码: 0=机器规则全过, 1=有 fail, 2=输入/配置错误
+// 退出码: 0=全过, 1=判据判定不合格, 2=输入/配置错误, 3=判据不可信或没跑完
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runRules, formatText, summarize, selectRules, EXIT } from './lib/runner.mjs';
@@ -157,7 +157,27 @@ function main() {
     }
   }
 
-  process.exit(hardFail || coverageFail ? EXIT.FAIL : EXIT.OK);
+  /**
+   * 退出码分流（2026-11-13 · §5 Q4.5）。
+   *
+   * 三种信号**必须可区分**，否则 CI 只能写「非 0 就阻断」，
+   * 于是"需要补文档"与"代码有问题"被当成同一件事。
+   *
+   *   3 INCOMPLETE：判据自身不可信，或覆盖率不足 ⇒ 结论无效，必须阻断
+   *   1 FAIL      ：判据跑完了，明确判定不合格 ⇒ 阻断
+   *   0 OK        ：全过
+   *
+   * 3 优先于 1：如果判据自己都不可信，那它报的 fail 也不该当作对被测对象的结论。
+   */
+  if (summary.untrusted > 0) {
+    console.error(
+      `判据自身不可信（${summary.untrustedIds.join(', ')}）⇒ 本次任何"通过"都不作数。` +
+        '这是判据缺陷，不是被测对象的问题。',
+    );
+    process.exit(EXIT.INCOMPLETE);
+  }
+  if (coverageFail) process.exit(EXIT.INCOMPLETE);
+  process.exit(hardFail ? EXIT.FAIL : EXIT.OK);
 }
 
 main();
