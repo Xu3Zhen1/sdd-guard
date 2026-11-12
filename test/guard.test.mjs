@@ -920,3 +920,57 @@ test('DISCIPLINE-C3：裸文件名不参与比对（避免误伤 —— 回执�
     ws.cleanup();
   }
 });
+
+// ── 回执②的绕过缺口：reason 类型校验（`String(x).trim()` 拦不住非字符串）──
+// 实测攻击面：reason = {} / 123 / true / [1,2] 全部"非空"从而让豁免生效，
+// 等于"随便填个值就放行"，留痕设计被绕过。必须类型严格。
+test('ACCEPT-E2 负控：reason 传非字符串（{} / 123 / true / [1,2]）→ 必须失败', () => {
+  const bads = [{}, 123, true, [1, 2], null];
+  for (const reason of bads) {
+    const ws = makeWorkspace();
+    try {
+      const { byId } = run(ws, {
+        cfg: { equivalentMutants: [{ id: 'S1', reason }] },
+        evidence: { mutation: { killed: 7, total: 8, survived: ['S1 a'] } },
+      });
+      assertFails(byId, 'ACCEPT-E2', 'equivalentMutants');
+    } finally {
+      ws.cleanup();
+    }
+  }
+});
+
+test('ACCEPT-E2 负控：id 传非字符串 → 必须失败（类型意图明确化）', () => {
+  const ws = makeWorkspace();
+  try {
+    const { byId } = run(ws, {
+      cfg: { equivalentMutants: [{ id: 123, reason: '数字 id' }] },
+      evidence: { mutation: { killed: 7, total: 8, survived: ['123 a'] } },
+    });
+    assertFails(byId, 'ACCEPT-E2', 'equivalentMutants');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('ACCEPT-E2 正控：合法字符串 reason 仍能正常豁免（类型收紧不能误伤）', () => {
+  const ws = makeWorkspace();
+  try {
+    // 10/14=0.71 红；扣掉 4 个等价变异后 10/10=1.00 绿
+    const { byId } = run(ws, {
+      cfg: {
+        equivalentMutants: [
+          { id: 'M11', reason: 'legacy 恒 null，语言层面不可杀' },
+          { id: 'M12', reason: 'String(s)===s 恒真' },
+          { id: 'M13', reason: '同机 host 恒等' },
+          { id: 'M14', reason: 'Buffer 字节等价' },
+        ],
+      },
+      evidence: { mutation: { killed: 10, total: 14, survived: ['M11 a', 'M12 b', 'M13 c', 'M14 d'] } },
+    });
+    assertPasses(byId, 'ACCEPT-E2');
+    assert.match(byId['ACCEPT-E2'].detail || '', /扣除等价变异 4 个/);
+  } finally {
+    ws.cleanup();
+  }
+});
