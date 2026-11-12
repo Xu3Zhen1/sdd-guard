@@ -101,7 +101,31 @@ function main() {
     ? { ...DEFAULT_CONFIG, ...JSON.parse(readFileSync(cfgPath, 'utf8')) }
     : DEFAULT_CONFIG;
   const outPath = args.out && args.out !== true ? resolve(args.out) : join(ROOT, 'evidence.json');
-  const cwd = args.cwd && args.cwd !== true ? resolve(args.cwd) : ROOT;
+
+  /**
+   * 工作目录默认值（2026-11-12 修）。
+   *
+   * 历史缺陷：早期 `cwd` 不传就默认 `ROOT`，即 **sdd-guard 自己的仓库根**。
+   * 于是拿它去验别的项目时，三个生产者全部在 sdd-guard 目录执行 →
+   * 全部 `Cannot find module` → 三键全失败 →「证据不完整，拒绝写出」。
+   * 文档也没提这一点，等于默认路径是个陷阱。
+   *
+   * 现在的优先级：--cwd > --repo > 报错。**不再静默回落到 ROOT**。
+   */
+  const cwdFromArgs = args.cwd && args.cwd !== true ? resolve(args.cwd) : null;
+  const cwdFromRepo = args.repo && args.repo !== true ? resolve(args.repo) : null;
+  const cwd = cwdFromArgs ?? cwdFromRepo;
+  if (!cwd) {
+    console.error('必须指定工作目录：用 --cwd <dir>（推荐）或 --repo <dir>。');
+    console.error('  早期版本默认回落到 sdd-guard 自身仓库根，导致"验别人的项目却在自己目录里跑命令"。');
+    console.error('  这个默认值已移除——请显式指定。');
+    process.exit(2);
+  }
+  if (!existsSync(cwd)) {
+    console.error(`工作目录不存在: ${cwd}`);
+    process.exit(2);
+  }
+
   const outDir = join(dirname(outPath), '.evidence-raw');
   mkdirSync(outDir, { recursive: true });
 
@@ -111,6 +135,7 @@ function main() {
   const parts = {};
   const producers = {};
   const failures = [];
+  const warnings = [];
 
   for (const key of EVIDENCE_KEYS) {
     const step = config[key];
@@ -126,12 +151,29 @@ function main() {
       failures.push(`${key}: ${r.reason}`);
       continue;
     }
+
+    /**
+     * 退出码语义（2026-11-12 修）。
+     *
+     * 历史缺陷：早期把「退出码非 0」一律当作「结果不可采信」，于是
+     * 一个如实报告"460 跑、4 红"的生产者因为退出码 1 被整份拒收 ——
+     * **连"跑了 460、红的是这 4 条"这个事实都留不下来，只剩"什么都没记录"。**
+     *
+     * 现在的判据：**能不能解析**才是"可不可信"的分界线；退出码只表示
+     * "被测项目自己健不健康"。解析成功 ⇒ 证据可用，退出码进 provenance 留痕，
+     * 由 ACCEPT-E1 依据解析出的 fail 数去判红 —— 而不是让生产者闭嘴。
+     *
+     * 需要"命令必须成功才算数"的生产者，对该步显式写 `requireZeroExit: true`。
+     */
     if (r.exitCode !== 0) {
-      // 命令自己失败：证据不可用。不把"失败但可解析"当成证据。
-      console.log(`  ✗ 命令退出码 ${r.exitCode}（输出已解析但结果不可采信）`);
-      failures.push(`${key}: 命令退出码 ${r.exitCode}`);
-      continue;
+      if (step.requireZeroExit === true) {
+        console.log(`  ✗ 命令退出码 ${r.exitCode}（该步声明 requireZeroExit，结果不采信）`);
+        failures.push(`${key}: 命令退出码 ${r.exitCode}（requireZeroExit）`);
+        continue;
+      }
+      warnings.push(`${key}: 命令退出码 ${r.exitCode}（输出可解析，已采信；由判据按解析结果定红）`);
     }
+
     parts[key] = r.parsed;
     producers[key] = r.provenance;
     console.log(`  ✓ ${JSON.stringify(r.parsed).slice(0, 90)}`);
@@ -144,10 +186,16 @@ function main() {
     process.exit(1);
   }
 
+  if (warnings.length) {
+    console.log('\n注意（已采信，但事实记在这里，报告也会带上）：');
+    for (const w of warnings) console.log(`  - ${w}`);
+  }
+
   const evidence = buildEvidence(parts, {
     generatedAt: new Date().toISOString(),
     cwd,
     producers,
+    warnings,
     tool: 'sdd-guard/tools/make-evidence.mjs',
   });
 

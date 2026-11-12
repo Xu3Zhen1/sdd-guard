@@ -76,7 +76,7 @@ steps.push(run('contract', 'node tools/check-contract.mjs'));
 // 先删旧证据：否则 make-evidence 失败时，验收会拿上一次的 evidence.json 跑出假绿。
 const evOut = join(ROOT, 'evidence.json');
 if (existsSync(evOut)) rmSync(evOut);
-steps.push(run('make-evidence', `node tools/make-evidence.mjs --out "${evOut}"`));
+steps.push(run('make-evidence', `node tools/make-evidence.mjs --out "${evOut}" --repo .`));
 const evidenceProduced = steps[steps.length - 1].ok && existsSync(evOut);
 
 // ── 4b. 校验证据链完整性（provenance 齐全）──────────────────

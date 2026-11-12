@@ -8,7 +8,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, cpSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, cpSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { runRules, summarize } from '../lib/runner.mjs';
 import { RULES } from '../lib/rules.mjs';
 import { rulesForProfile } from '../lib/contract.mjs';
+import { extractPaths } from '../lib/rules.mjs';
 
 /** 判定某规则是否属于代码阶段（acceptance 档）——测试用，避免把手工 id 清单写死在用例里。 */
 function byStageIsCode(id) {
@@ -52,6 +53,14 @@ function makeWorkspace() {
     root,
     changeDir: join(root, CHANGE_REL),
     cfg: { ...BASE_CFG },
+    /** 读正向夹具里的制品原文（给需要对齐内容的用例用）。 */
+    readArt: (name) => {
+      try {
+        return readFileSync(join(root, CHANGE_REL, name), 'utf8');
+      } catch {
+        return null;
+      }
+    },
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   };
 }
@@ -102,8 +111,8 @@ test('基线：正向夹具让所有机器规则通过，且每条都真的执�
     for (const id of machineIds) {
       const r = byId[id];
       // 依赖**外部输入**的规则在无输入时必须 skip，不是 pass：
-      // DISCIPLINE-C1 需要 --diff，ACCEPT-E* 需要 --evidence。
-      if (id === 'DISCIPLINE-C1' || id.startsWith('ACCEPT-')) {
+      // DISCIPLINE-C1 / C3 需要 --diff，ACCEPT-E* 需要 --evidence。
+      if (id === 'DISCIPLINE-C1' || id === 'DISCIPLINE-C3' || id.startsWith('ACCEPT-')) {
         assert.equal(r.status, 'skip', `${id} 无输入时应为 skip，实际 ${r.status}`);
         continue;
       }
@@ -754,6 +763,66 @@ test('ACCEPT-E2 负控：杀死率不足 → 必须失败并回显存活项', ()
   }
 });
 
+// ── 回执缺陷②：等价变异豁免（硬阈值遇到物理不可杀的变异必然误红）──
+test('ACCEPT-E2 正控：声明等价变异后从分母扣除 → 由红转绿', () => {
+  const ws = makeWorkspace();
+  try {
+    // 10/14 = 0.71 < 0.8 ⇒ 红；扣除 2 个等价变异后 10/12 = 0.83 ⇒ 绿
+    const mutation = { killed: 10, total: 14, survived: ['E1 恒真', 'E2 仅引用不同'] };
+    const before = run(ws, { evidence: { mutation } }).byId;
+    assertFails(before, 'ACCEPT-E2', '0.71');
+
+    const after = run(ws, {
+      cfg: { equivalentMutants: [{ id: 'E1', reason: 'String(s)===s 恒真' }, { id: 'E2', reason: '字节相同仅引用不同' }] },
+      evidence: { mutation },
+    }).byId;
+    assertPasses(after, 'ACCEPT-E2');
+    assert.match(after['ACCEPT-E2'].detail || '', /扣除等价变异 2/);
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('ACCEPT-E2 负控：等价变异缺 reason → 必须失败（豁免不能静默）', () => {
+  const ws = makeWorkspace();
+  try {
+    const { byId } = run(ws, {
+      cfg: { equivalentMutants: [{ id: 'E1' }, { id: 'E2', reason: '   ' }] },
+      evidence: { mutation: { killed: 10, total: 14, survived: ['E1 甲', 'E2 乙'] } },
+    });
+    assertFails(byId, 'ACCEPT-E2', 'reason');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('ACCEPT-E2 负控：豁免掉全部变异 → 分母为 0，必须失败（空集陷阱）', () => {
+  const ws = makeWorkspace();
+  try {
+    const { byId } = run(ws, {
+      cfg: { equivalentMutants: [{ id: 'E1', reason: 'x' }, { id: 'E2', reason: 'y' }] },
+      evidence: { mutation: { killed: 0, total: 2, survived: ['E1 甲', 'E2 乙'] } },
+    });
+    assertFails(byId, 'ACCEPT-E2', '分母为 0');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('ACCEPT-E2：声明了但本次并未存活的豁免必须被提示（理由可能已过时）', () => {
+  const ws = makeWorkspace();
+  try {
+    const { byId } = run(ws, {
+      cfg: { equivalentMutants: [{ id: 'E9', reason: '历史遗留' }] },
+      evidence: { mutation: { killed: 11, total: 11 } },
+    });
+    assertPasses(byId, 'ACCEPT-E2');
+    assert.match(byId['ACCEPT-E2'].detail || '', /未存活/);
+  } finally {
+    ws.cleanup();
+  }
+});
+
 test('ACCEPT-E3 负控：checks=0（漂移检测没跑过）→ 必须失败', () => {
   const ws = makeWorkspace();
   try {
@@ -787,6 +856,66 @@ test('缺 design.md 时，依赖与复用规则必须 skip 而不是 pass', () =
     assert.equal(byId['DRY-D1'].status, 'skip');
     assert.ok(summary.skip >= 2, 'skip 计数未增加');
     assert.ok(summary.covered < summary.machineTotal, '覆盖率应反映"有规则没执行"');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// DISCIPLINE-C3：文档声明 ↔ 实际变更 绑定
+// 回执结论一的核心：process 档原来不读代码，四制品描述"另一件没做的事"仍 7 绿。
+// ─────────────────────────────────────────────────────────────
+test('DISCIPLINE-C3 负控：「文档说改 A、实际改了 B」必须失败', () => {
+  const ws = makeWorkspace();
+  try {
+    const { byId } = run(ws, {
+      diff: { files: [{ path: 'src/other.mjs', added: 10, deleted: 2 }], total: 12 },
+    });
+    assertFails(byId, 'DISCIPLINE-C3', '不对应');
+    const items = byId['DISCIPLINE-C3'].items || [];
+    assert.ok(items.some((s) => s.includes('改了但文档没提')), '未指出"改了但文档没提"');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('DISCIPLINE-C3 正控：声明的路径全部出现在变更集 → 通过', () => {
+  const ws = makeWorkspace();
+  try {
+    // 与规则口径一致：只取带目录、非本机绝对路径的声明，全部放进 diff。
+    const declared = extractPaths(
+      [ws.readArt('tasks.md'), ws.readArt('design.md')].filter(Boolean).join('\n'),
+    ).filter((p) => p.includes('/') && !/^[A-Za-z]:/.test(p));
+    assert.ok(declared.length >= 2, `正向夹具声明路径太少（${declared.length}），用例不够有判别力`);
+    const files = declared.map((p) => ({ path: p.replace(/\\/g, '/'), added: 5, deleted: 1 }));
+    const { byId } = run(ws, { diff: { files, total: files.length * 6 } });
+    assertPasses(byId, 'DISCIPLINE-C3');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('DISCIPLINE-C3 负控：无 diff 时必须是 skip，不能算通过', () => {
+  const ws = makeWorkspace();
+  try {
+    const { byId } = run(ws, { diff: null });
+    assert.equal(byId['DISCIPLINE-C3'].status, 'skip');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('DISCIPLINE-C3：裸文件名不参与比对（避免误伤 —— 回执实测被误伤 3 次）', () => {
+  const ws = makeWorkspace();
+  try {
+    const { byId } = run(ws, {
+      diff: { files: [{ path: 'src/x.mjs', added: 1, deleted: 0 }], total: 1 },
+    });
+    const items = byId['DISCIPLINE-C3'].items || [];
+    assert.ok(
+      !items.some((s) => /声明了但没改: [^/\n]+\.js/.test(s)),
+      '裸文件名被当成带目录路径了',
+    );
   } finally {
     ws.cleanup();
   }

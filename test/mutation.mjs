@@ -176,8 +176,17 @@ const MUTANTS = [
       writeFileSync(join(ws.root, 'web', 'leaky.js'), "import { exportHandler } from '../src/export/handler.js';\nexport const x = exportHandler;\n");
     },
   },
+  {
+    id: 'DISCIPLINE-C3',
+    name: 'M12 文档↔代码绑定失效（文档说改 A、实际改 B 仍放行）',
+    damage: (ws) => {
+      // 现场：tasks.md 声明改 src/export/handler.js，但 diff 里改的是别的文件。
+      // 若 C3 实现正确，它必须红；若它恒真放行，就是 7 绿假象。
+      ws.diff = { files: [{ path: 'src/util/other.js', added: 3, deleted: 0 }] };
+    },
+    diff: true,
+  },
 ];
-
 const report = [];
 let failures = 0;
 

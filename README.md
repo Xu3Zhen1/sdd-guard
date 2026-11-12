@@ -19,7 +19,7 @@
 | 本质不可判定 | 标记 MANUAL，**永远不算通过**，必须人签字 | 6 条 |
 | 输入不足 | 标记 SKIP，**不算通过**，单独计数 | 动态 |
 
-合计 **22 条 = 16 机器 + 6 人工**。
+合计 **23 条 = 17 机器 + 6 人工**。
 
 ## 两套档位：开发流程 ≠ 验收标准
 
@@ -106,6 +106,7 @@ node cli.mjs check \
 | YAGNI-C1 | YAGNI | 不得出现「预留/未来可能用到/for future use」类标记 |
 | DISCIPLINE-C1 | 纪律 | 变更落在 `allowedPrefixes` 内，且总行数 ≤ `maxDiffLines` |
 | DISCIPLINE-C2 | 纪律 | **仓库根不得堆积临时产物**（`pip-*` / 随机 `tmp*` / `cdp-profile-*` / `diag-*`） |
+| DISCIPLINE-C3 | 纪律 | **文档声明的文件必须出现在实际变更里**（文档↔代码绑定） |
 | KISS-C2 | KISS | *MANUAL* 现有依赖能否替代新增抽象 |
 
 ### 前后端解耦（DECOUPLING）

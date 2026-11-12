@@ -180,6 +180,7 @@ node cli.mjs --help
 | `allowedPrefixes` | string[] | `[]` | `DISCIPLINE-C1` 允许变更的路径前缀（空 = 不校验） |
 | `maxDiffLines` | int | `400` | `DISCIPLINE-C1` 变更行数预算 |
 | `minMutationRatio` | number | `0.8` | `ACCEPT-E2` 变异杀死率下限 |
+| `equivalentMutants` | array | `[]` | 等价变异声明 `[{id, reason}]`；从 `ACCEPT-E2` 分母扣除。**`reason` 必填**，缺则判 fail |
 | `boundaries` | object | `{}` | `DECOUPLE-2` 边界前缀表 `{ 边界名: [仓库相对前缀…] }`；空 = 解耦检查 skip |
 | `forbidImports` | array | `[]` | `DECOUPLE-2` 禁止的跨边界引用，`{from,to}` 或 `[from,to]`；空 = skip |
 | `contractPrefixes` | string[] | `[]` | `DECOUPLE-1` 契约文件必须落在的前缀；空 = 不限制位置 |
@@ -199,6 +200,38 @@ node cli.mjs --help
 - `path` 用于 `allowedPrefixes` 前缀比较（`\` 归一为 `/`）。
 - `added + deleted` 汇总用于 `maxDiffLines`。
 - **空 `files` ⇒ `DISCIPLINE-C1` = skip**（空集不构成通过）。
+
+**生成器**：`tools/make-diff.mjs`（2026-11-12 新增）。
+
+```bash
+node tools/make-diff.mjs --repo . --out diff.json                    # 工作树 vs HEAD
+node tools/make-diff.mjs --repo . --base origin/main --out diff.json # vs 某分支
+node tools/make-diff.mjs --repo . --staged --out diff.json           # 已暂存
+node tools/make-diff.mjs --repo . --range HEAD~3..HEAD --out diff.json
+```
+
+**为什么这个工具是必需的**：没有 diff 时，`DISCIPLINE-C1`（越界/预算）与
+`DISCIPLINE-C3`（文档↔代码绑定）**都是 skip**，而 skip 不是通过 ——
+也就是说这两类问题在过去是**永远检不出来**的。
+
+### 5.2 `DISCIPLINE-C3`：文档声明 ↔ 实际变更 绑定（S3，2026-11-12 新增）
+
+**它解决的问题**（对方 8 片实测，决定性实验）：同一份 change 目录，只改四制品不动代码：
+
+| 实验 | process 档结果 |
+|---|---|
+| 四制品完美 + 代码零改动 | 7 绿 0 红 |
+| 四制品**全空** | 6 红（唯一抓到问题的场景） |
+| 四制品描述**另一件完全没做的事** | **仍 7 绿 0 红** |
+
+8 片共跑 9 次 process 档，**0 次因"这片做得不对"而红**。它当时接近 Markdown 链接检查器。
+
+**判定规则**：
+
+1. 从 `tasks.md` / `design.md` 抽取反引号内的路径；**只取带目录的**（裸文件名歧义太大，会误伤）。
+2. 每条声明路径必须**出现在 diff 的 `files[].path` 里**，否则 FAIL（`声明了但没改`）。
+3. 反向：diff 里的源码文件若在文档中完全找不到出处，也 FAIL（`改了但文档没提`）——防"偷偷扩大范围"。
+4. 无 diff / diff 为空 / 无 tasks+design ⇒ **skip**（不假装通过）。
 
 ### 5.2 `--evidence`（S2，`acceptance` 档必填）
 

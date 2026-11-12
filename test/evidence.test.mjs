@@ -86,6 +86,35 @@ test('parseMutationReport：存活变异体带出名字', () => {
   assert.match(r.survived[0], /M2 乙/);
 });
 
+// ── 回执缺陷①（最严重）：前缀绑死 `M` 会让存活变异被整段吞掉 ──
+// 实测形态：存活变异叫 S1..S4 时，解析出 killed=total ⇒ 杀死率 100% ⇒ ACCEPT-E2 假绿。
+test('parseMutationReport 负控：非 M 前缀的存活变异也必须被计入（否则假绿）', () => {
+  const text = [
+    '  M1 甲 ✓',
+    '  M2 乙 ✓',
+    '  S1 丙 ✗',
+    '  S2 丁 ✗',
+  ].join('\n');
+  const r = parseMutationReport(text);
+  assert.equal(r.total, 4, '非 M 前缀的行被吞掉了 —— 分母缩水，杀死率会假性变高');
+  assert.equal(r.killed, 2);
+  assert.equal(r.survived.length, 2);
+  assert.deepEqual(r.survived.map((s) => s.split(' ')[0]), ['S1', 'S2']);
+});
+
+test('parseMutationReport 正控：多种 id 形态都要认出（mut-3 / X12 / A1）', () => {
+  const text = ['  mut-3 甲 ✓', '  X12 乙 ✗', '  A1 丙 ✓'].join('\n');
+  const r = parseMutationReport(text);
+  assert.equal(r.total, 3);
+  assert.equal(r.killed, 2);
+});
+
+// ── 回执缺陷①的配套：报告自相矛盾必须抛错，不能"取信一边" ──
+test('parseMutationReport 负控：声称"全部被捕获"但有存活行 → 抛错', () => {
+  const text = ['  M1 甲 ✓', '  M2 乙 ✗', '结论: 全部变异均被捕获 ✓'].join('\n');
+  assert.throws(() => parseMutationReport(text), /自相矛盾/);
+});
+
 // ── 合成与校验 ────────────────────────────────────────────
 test('buildEvidence 负控：没有任何证据 → 抛错（不能产出空证据文件）', () => {
   assert.throws(() => buildEvidence({}, { generatedAt: 'x' }), /没有任何证据/);
