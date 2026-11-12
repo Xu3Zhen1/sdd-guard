@@ -147,5 +147,26 @@ if (failed.length) {
   process.exit(1);
 }
 const executed = steps.filter((s) => !s.skipped).length;
-console.log(`\n全部 ${executed}/${steps.length} 项通过${args['skip-acceptance'] ? '（验收已跳过，本次不构成交付验收）' : ''}`);
+const skipped = steps.filter((s) => s.skipped);
+
+/**
+ * 跳过验收时的退出码（评审包 §5 Q4.6，2026-11-13 修正）。
+ *
+ * 原实现：`--skip-acceptance` 把该步标为 ok:true/skipped:true，最后无条件 exit 0。
+ * 后果：「跳过了验收」与「验收通过」在退出码上**完全不可区分** ——
+ * 只在文案里加一句"本次不构成交付验收"，属于"看见但无权改变仍是静默"。
+ * CI 里 `node tools/self-check.mjs --skip-acceptance` 会被读成合格。
+ *
+ * 现在：有跳过项 ⇒ 退出码 3（INCOMPLETE，与 cli.mjs 同一语义）。
+ * 依据是 SWITCH_CLASS 的 AUDITABLE 档要求「关闭后痕迹必须影响机器判定」——
+ * 只印一行给人看的话不算。
+ */
+console.log(`\n全部 ${executed}/${steps.length} 项通过` + (skipped.length ? `（${skipped.map((x) => x.name).join(', ')} 已跳过，本次不构成交付验收）` : ''));
+if (skipped.length) {
+  console.error(
+    `\n${skipped.length} 项被显式跳过（${skipped.map((x) => x.name).join(', ')}）⇒ 退出码 3：` +
+      '本次结果不完整，不得当作交付验收。要拿到可信结论请去掉跳过参数重跑。',
+  );
+  process.exit(3);
+}
 process.exit(0);

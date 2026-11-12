@@ -10,7 +10,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { VERSION, STATUSES, EXIT_CODES, OPTIONS, CONFIG_DEFAULTS, REPEATABLE_KEYS, PROFILE_NAMES, EVIDENCE_KEYS, rulesForProfile } from '../lib/contract.mjs';
+import { VERSION, STATUSES, EXIT_CODES, OPTIONS, CONFIG_DEFAULTS, REPEATABLE_KEYS, PROFILE_NAMES, EVIDENCE_KEYS, rulesForProfile, SWITCHES, SWITCH_CLASS } from '../lib/contract.mjs';
 import { EXIT as RUNNER_EXIT } from '../lib/runner.mjs';
 import { REPEATABLE_KEYS as ARGS_REPEATABLE } from '../lib/args.mjs';
 
@@ -187,6 +187,39 @@ const readme = readText(README, 'README.md');
   const evidenceRules = acc.filter((r) => r.id.startsWith('ACCEPT-'));
   if (evidenceRules.length >= 3) ok(`acceptance 档含 ${evidenceRules.length} 条证据判据`);
   else bad(`acceptance 档证据判据不足（${evidenceRules.length} 条），"验收"名不副实`);
+
+  // ── 开关可关闭性（评审包 §5 Q4.6）──────────────────────────
+  // 判据：一个开关属哪档不靠"感觉危不危险"，而靠**关掉后信号是否仍可分辨**。
+  // 新加一个能削弱判据的开关却不登记 ⇒ 这里报漂移。
+  {
+    const registered = new Set(SWITCHES.map((x) => x.key));
+    const boolOpts = OPTIONS.filter((o) => o.boolean).map((o) => o.key);
+    const exempt = new Set(['json', 'help']);
+    const unregistered = boolOpts.filter((k) => !registered.has(k) && !exempt.has(k));
+    if (unregistered.length) {
+      bad(`以下布尔开关未在 contract.SWITCHES 登记（无法判断能否安全关闭）: ${unregistered.join(', ')}`);
+    } else {
+      ok(`SWITCHES 登记了全部 ${boolOpts.length - exempt.size} 个布尔开关`);
+    }
+  }
+  {
+    const forbidden = SWITCHES.filter((x) => x.kind === SWITCH_CLASS.FORBIDDEN);
+    const optKeys = new Set(OPTIONS.map((o) => o.key));
+    const leaked = forbidden.filter((x) => optKeys.has(x.key));
+    if (leaked.length) bad(`FORBIDDEN 开关竟有命令行入口: ${leaked.map((x) => x.key).join(', ')}`);
+    else ok(`FORBIDDEN 档 ${forbidden.length} 个开关均无命令行入口`);
+  }
+  {
+    const auditable = SWITCHES.filter((x) => x.kind === SWITCH_CLASS.AUDITABLE);
+    const noEvidence = auditable.filter((x) => !x.evidence);
+    if (noEvidence.length) bad(`AUDITABLE 开关未说明关闭后痕迹: ${noEvidence.map((x) => x.key).join(', ')}`);
+    else ok(`AUDITABLE 档 ${auditable.length} 个开关均声明了可观测痕迹`);
+  }
+  {
+    const sc = readFileSync(join(ROOT, 'tools/self-check.mjs'), 'utf8');
+    if (/process\.exit\(3\)/.test(sc)) ok('self-check 跳过验收时以退出码 3 留痕');
+    else bad('self-check 跳过验收时未以退出码 3 留痕（仅文案不算可察觉）');
+  }
 }
 
 // ── 输出 ────────────────────────────────────────────────────
