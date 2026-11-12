@@ -64,6 +64,26 @@ node tools/check-publish.mjs  # 脱敏 / LF / package.json 结构
 - 语义：新增判据 / 改默认阈值 = 次版本；改 `status` 枚举或退出码语义 = 主版本（ICD §8 兼容性承诺）。
 - 打 tag：`git tag -a v0.1.0 -m "sdd-guard 0.1.0"` 后 `git push --tags`。
 
+### 推送通道（2026-11-12 实证）
+
+**`git push` 走 HTTPS 报 `Failed to connect to github.com port 443` 时，先别改网络配置，换 SSH 通道。**
+
+实证：同一时刻 `gh api rate_limit` 正常（走 `api.github.com`），
+`Test-NetConnection github.com -Port 443` = False，HTTPS push 连试 3 次全失败；
+改用 `git push git@github.com:Xu3Zhen1/sdd-guard.git main` 一次成功。
+
+排查顺序：
+
+```bash
+Test-NetConnection github.com -Port 443 -InformationLevel Quiet   # False ⇒ 443 不可达
+gh api rate_limit --jq '.rate.remaining'                          # 有值 ⇒ api 链路正常（但不是 git 链路）
+git push git@github.com:<owner>/<repo>.git main                   # 走 SSH，绕过 443
+```
+
+> 历史经验补充：2026-11-11 第一次遇到同类报错时，**原样重试一次**就成功了（纯瞬时失败）。
+> 所以顺序应是：先重试一次 → 仍失败再看 443 连通性 → 不可达就换 SSH。
+> 不要一上来就改代理配置——三次实测里代理变量都是空的，问题不在代理。
+
 ## ⑤ 不欢迎的贡献
 
 - 把判据改软以迁就某段代码（应改代码或走豁免，而不是降阈值）。
