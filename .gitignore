@@ -16,6 +16,8 @@ Thumbs.db
 desktop.ini
 
 # 临时文件
+# 一次性探查脚本与夹具（2026-11-13 提交时误纳入，已移除）
+_work/tmp/
 *.tmp
 *.bak
 *.orig
