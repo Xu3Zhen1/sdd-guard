@@ -9,10 +9,17 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, cpSync, writeFileSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { writableTempRoot } from '../lib/temp.mjs';
 import { runRules } from '../lib/runner.mjs';
 
-const FIXTURE = new URL('./fixtures/q1-base/', import.meta.url).pathname.replace(/^\//, '');
+/**
+ * 夹具目录绝对路径。★ 2026-11-13 六环境矩阵抓到：
+ew URL(...).pathname 在 Linux 上是
+ * 系统临时目录下...，.replace(/^\//, '') 会剥掉前导斜杠 ⇒ 变成相对路径 ⇒ cpSync ENOENT。
+ * 那是为 Windows 前缀 /F:/ 打的补丁，反而在 Linux 上制造了缺陷。改用 fileURLToPath。
+ */
+const FIXTURE = fileURLToPath(new URL('./fixtures/q1-base/', import.meta.url));
 
 function runWith(root, { tasks, design, diff }) {
   const cd = join(root, 'changes/x');

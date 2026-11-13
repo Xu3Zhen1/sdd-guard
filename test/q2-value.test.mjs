@@ -15,10 +15,21 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { writableTempRoot } from '../lib/temp.mjs';
 import { runRules } from '../lib/runner.mjs';
 
-const FIXTURE = new URL('./fixtures/q1-base/', import.meta.url).pathname.replace(/^\//, '');
+/**
+ * 夹具目录的绝对路径。
+ *
+ * ★ 2026-11-13 六环境矩阵抓到（原来写成 `.pathname.replace(/^\/, '')`）：
+ * 在 Windows 上 `new URL(...).pathname` 形如 `/F:/...`，那个前导斜杠**必须**去掉；
+ * 但在 Linux 上它是真正的绝对路径，去掉前导斜杠就变成**相对路径** ⇒
+ * `cpSync` 报 `ENOENT: lstat ...`，7 条全红。
+ *
+ * 正确做法：不用 `pathname` 字符串魔法，交给 `fileURLToPath` 做平台正确的转换。
+ */
+const FIXTURE = fileURLToPath(new URL('./fixtures/q1-base/', import.meta.url));
 
 /** 跑 C3：change 目录里放给定制品，diff 里放给定变更文件。 */
 function runC3({ proposal, design, tasks, specs, diffFiles }) {

@@ -17,7 +17,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, mkdtempSync, rmSync, readFileSync, existsSync, openSync, closeSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { writableTempRoot } from '../../lib/temp.mjs';
 import { spawnSync } from 'node:child_process';
@@ -425,12 +425,48 @@ check('A09-1', () => {
   return { msg: '双 TAP 汇总 ⇒ make-evidence 非 0 且不写出证据', evidence: '不再取首个匹配拼出 999 全绿' };
 });
 check('A11-1', () => {
-  const ev = JSON.parse(readFileSync(join(ROOT, 'evidence.json'), 'utf8'));
+  /**
+   * ★ 2026-11-13 六环境矩阵抓到：这条断言原来直接读仓库根的 `evidence.json`，
+   * 而那个文件是 `self-check` 的 `make-evidence` 步才产出的 —— 在 `scripts.test` 里
+   * 单独跑本文件时它**不存在** ⇒ 六环境全部 1 条红。
+   *
+   * 修法不是"跳过"，而是**本探针自己产一份证据**：探针要验的是
+   * 「provenance 的 runId/tree/完整 64 位 sha256 齐全」，那就当场跑一次 make-evidence，
+   * 用自己产出的文件断言。**不依赖外部前置产物，也不读别人跑过的旧文件。**
+   */
+  const evDir = mkdtempSync(join(writableTempRoot(), 'spec-ev-'));
+  const evOut = join(evDir, 'evidence.json');
+  const cfg = join(evDir, 'cfg.json');
+  const producer = join(evDir, 'producer.mjs');
+  writeFileSync(producer, "console.log('\u2139 tests 3');console.log('\u2139 pass 3');console.log('\u2139 fail 0');");
+  writeFileSync(
+    cfg,
+    JSON.stringify({
+      tests: { command: `node "${producer}"` },
+      mutation: { command: 'node test/mutation.mjs' },
+      drift: { command: 'node tools/check-contract.mjs' },
+    }),
+  );
+  const fdOut = join(evDir, 'run.txt');
+  const fd = openSync(fdOut, 'w');
+  let r;
+  try {
+    r = spawnSync(process.execPath, ['tools/make-evidence.mjs', '--config', cfg, '--out', evOut, '--repo', ROOT], {
+      cwd: ROOT,
+      stdio: ['ignore', fd, fd],
+    });
+  } finally {
+    closeSync(fd);
+  }
+  assert.equal(r.status, 0, `make-evidence 必须成功（exit ${r.status}），日志: ${readFileSync(fdOut, 'utf8').slice(-300)}`);
+
+  const ev = JSON.parse(readFileSync(evOut, 'utf8'));
   assert.ok(ev.meta && ev.meta.runId, 'evidence 必须带 meta.runId');
   assert.ok(ev.meta.tree, 'evidence 必须带代码树身份');
   assert.equal(typeof ev.meta.producers.tests.sha256, 'string');
   assert.equal(ev.meta.producers.tests.sha256.length, 64, `sha256 必须是完整 64 位，实际 ${ev.meta.producers.tests.sha256.length}`);
-  return { msg: 'provenance：runId + tree + 完整 64 位 sha256 齐全', evidence: `sha256 长度 ${ev.meta.producers.tests.sha256.length}` };
+  rmSync(evDir, { recursive: true, force: true });
+  return { msg: 'provenance：本探针当场产出的证据里 runId + tree + 完整 64 位 sha256 齐全', evidence: `sha256 长度 64` };
 });
 
 // ─────────────────────────────────────────────────────────────
