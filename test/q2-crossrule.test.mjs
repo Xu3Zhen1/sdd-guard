@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, cpSync, writeFileSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { writableTempRoot } from '../lib/temp.mjs';
 import { runRules } from '../lib/runner.mjs';
 
 const FIXTURE = new URL('./fixtures/q1-base/', import.meta.url).pathname.replace(/^\//, '');
@@ -33,7 +33,7 @@ function runWith(root, { tasks, design, diff }) {
 }
 
 function withRoot(fn) {
-  const root = mkdtempSync(join(tmpdir(), 'sdd-q2-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'sdd-q2-'));
   cpSync(FIXTURE, root, { recursive: true });
   try { return fn(root); } finally { rmSync(root, { recursive: true, force: true }); }
 }

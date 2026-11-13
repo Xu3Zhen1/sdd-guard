@@ -17,7 +17,7 @@
 
 | 类别 | 处理 | 占比 |
 | :-- | :-- | :-- |
-| 可机械判定 | 写成规则，违背即 FAIL | 16 条 |
+| 可机械判定 | 写成规则，违背即 FAIL | 17 条 |
 | 本质不可判定 | 标记 MANUAL，**永远不算通过**，必须人签字 | 6 条 |
 | 输入不足 | 标记 SKIP，**不算通过**，单独计数 | 动态 |
 
@@ -28,7 +28,7 @@
 | | `--profile process` | `--profile acceptance` |
 | :-- | :-- | :-- |
 | 回答什么 | 有没有按流程把活写清楚 | 能不能交付 |
-| 包含哪些规则 | 四制品判据（proposal / specs / design / tasks），**11 条** | 代码级判据 + `ACCEPT-E*`，**11 条** |
+| 包含哪些规则 | 四制品判据（proposal / specs / design / tasks），**11 条 = 7 机器 + 4 人工** | 代码级判据 + `ACCEPT-E*`，**12 条 = 10 机器 + 2 人工** |
 | 何时跑 | 开发过程中反复跑 | 交付前跑一次 |
 | 失败含义 | 还没走到位，**不代表交付不合格** | **不能收** |
 | 输入 | 四个 md 制品 | 制品 + `--evidence` 外部证据 |
@@ -189,12 +189,24 @@ node tools/check-publish.mjs   # 脱敏 / LF / package.json 结构 / .gitignore 
 
 ## CI 跑什么
 
-`.github/workflows/ci.yml` 在 ubuntu 与 windows、Node 20 与 22 上跑**同样两条命令**：`self-check` 与 `check-publish`。
-本地绿 ≠ CI 绿的事我们不接受——所以 CI 不重新发明规则，只是把这两条命令执行一遍；失败时上传 `.selfcheck/` 原始日志。
+`.github/workflows/ci.yml` 在 **ubuntu-latest 与 windows-latest × Node 20 / 22 / 24 的六环境矩阵**上跑**同样三条命令**：`self-check`、`check-publish`，以及覆盖率守卫负控。
+
+本地绿 ≠ CI 绿的事我们不接受——所以 CI 不重新发明规则，只是把这几条命令执行一遍；失败时上传 `.selfcheck/` 原始日志。
+
+> **等价性的准确说法**（2026-11-13 审计 A08 收敛）：`self-check` 覆盖的是 CI 里**当前这条单机命令链**，并且由 `check-contract` 用**结构化比对**（解析 yaml 的 run 步骤、剔除注释、提取脚本名）断言两者同步。但它**不等价于六环境矩阵** —— 操作系统差异、Node 版本差异只有 CI 真的跑起来才知道。旧文案「真正等价于 CI」是过度承诺，已改。
 ```
 
-`self-check` 是交付前唯一需要记住的命令：8 个步骤全部通过才 exit 0；任一步失败整条命令失败，原始输出留在 `.selfcheck/`。**默认对 sdd-guard 自己跑验收（自举）**：change 目录 `changes/self-host-guard/`，代码根 `lib tools cli.mjs`。
-它**先删旧证据再重新生成**，避免 make-evidence 失败时拿上一次的 `evidence.json` 跑出假绿。
+`self-check` 是交付前唯一需要记住的命令：**全部步骤通过才 exit 0**；任一步失败整条命令失败，原始输出留在 `.selfcheck/`。**默认对 sdd-guard 自己跑验收（自举）**：change 目录 `changes/self-host-guard/`，代码根 `lib tools cli.mjs`。
+
+它的步骤按**三类范围**分开声明，不混成一句"全过"：
+
+| 范围 | 包含什么 | 能支持什么结论 |
+| :-- | :-- | :-- |
+| 工具健康 | 基础测试 + 七套专项 + 变异 + 契约漂移 + 发布前置 | 工具本身没坏 |
+| 自举流程 | `--profile process` | 四制品形态达标 |
+| 交付检查 | `make-evidence` + 证据链 + `--profile acceptance` + 覆盖率负控 | 本期证据合格 |
+
+它**先隔离旧证据再重新生成**，避免 make-evidence 失败时拿上一次的 `evidence.json` 跑出假绿。
 
 `mutation.mjs` 对每条规则做 `fail → pass → fail` 三态验证：
 把 `run()` 换成恒真实现后规则必须翻绿，还原后必须翻红。

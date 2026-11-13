@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, cpSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writableTempRoot } from '../lib/temp.mjs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -47,7 +47,7 @@ const BASE_CFG = {
 
 /** 复制正向夹具到临时目录，返回 {root, changeDir, cfg}，供各用例局部改坏。 */
 function makeWorkspace() {
-  const root = mkdtempSync(join(tmpdir(), 'sdd-guard-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'sdd-guard-'));
   cpSync(GOOD, root, { recursive: true });
   return {
     root,

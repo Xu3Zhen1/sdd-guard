@@ -1,5 +1,7 @@
 {
-  "contractPrefixes": ["lib/"],
+  "contractPrefixes": [
+    "lib/"
+  ],
   "boundaries": {},
   "forbidImports": [],
   "maxNesting": 3,
@@ -8,6 +10,19 @@
   "yagniMinNonGoals": 3,
   "dryMinReuse": 1,
   "dependencies": {},
-  "allowedPrefixes": ["lib/", "tools/", "test/", "docs/", "changes/"],
+  "allowedPrefixes": [
+    "lib/",
+    "tools/",
+    "test/",
+    "docs/",
+    "changes/",
+    "cli.mjs",
+    "package.json",
+    "README.md",
+    "CONTRIBUTING.md",
+    "AGENTS.md.template",
+    ".gitignore",
+    "guard.config.json", "evidence.config.json", ".github/"
+  ],
   "maxDiffLines": 400
 }

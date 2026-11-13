@@ -125,15 +125,25 @@ for (const f of toCommit) {
   if (raw.includes(0x0d)) findings.crlf.push(f.rel);
 
   const text = raw.toString('utf8').replace(/\r/g, '');
+  scanLineSecrets(text, f.rel, identities, findings);
+}
+
+/**
+ * 逐行扫敏感信息（本机身份 / 密钥模式）。
+ *
+ * 抽成函数是为了守住 KISS-C1（≤3 层）：内联写法是 文件→行→模式→条件 四层。
+ * 语义未改：两个模式表都在**每一行**上各测一次，`AUTHOR_FILES` 只豁免身份那一类。
+ */
+function scanLineSecrets(text, rel, ids, findings) {
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
     for (const pat of SECRET_PATTERNS) {
-      if (pat.re.test(lines[i])) findings.sensitive.push(`${f.rel}:${i + 1} ${pat.why}`);
+      if (pat.re.test(lines[i])) findings.sensitive.push(`${rel}:${i + 1} ${pat.why}`);
     }
-    if (!AUTHOR_FILES.has(f.rel)) {
-      for (const id of identities) {
-        if (lines[i].includes(id)) findings.sensitive.push(`${f.rel}:${i + 1} 本机身份 ${id}`);
-      }
+    const skipIdentity = AUTHOR_FILES.has(rel);
+    if (skipIdentity) continue;
+    for (const id of ids) {
+      if (lines[i].includes(id)) findings.sensitive.push(`${rel}:${i + 1} 本机身份 ${id}`);
     }
   }
 }

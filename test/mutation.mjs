@@ -11,7 +11,7 @@
 //   ④ 同时校验：变异不能影响无关规则的结论（隔离性）
 
 import { mkdtempSync, writeFileSync, rmSync, cpSync, readFileSync, mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writableTempRoot } from '../lib/temp.mjs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -40,7 +40,7 @@ const BASE_CFG = {
 };
 
 function wsMake() {
-  const root = mkdtempSync(join(tmpdir(), 'sdd-mut-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'sdd-mut-'));
   cpSync(GOOD, root, { recursive: true });
   return {
     root,
@@ -267,5 +267,19 @@ for (const m of MUTANTS) {
 console.log('=== 变异负控报告（进程内） ===');
 for (const r of report) console.log('  ' + r);
 console.log('');
+/**
+ * ★ 清单长度声明（2026-11-13 审计 A09 修，**必须打**）。
+ *
+ * 缺陷形态：解析器过去把 `total` 定义成"匹配到的行数"，于是
+ *   · 生产者中途崩了、只打到第一条就退出的报告 ⇒ killed=1/total=1 ⇒ 杀死率 100%
+ *   · 真正只有一个变异体的报告 ⇒ 同一个数字
+ * **"被截断"与"完整"在文本上完全同形**，截断报告会被当成满分证据。
+ *
+ * 修法：生产者必须自己声明**库存总数**，解析器再拿它跟实测行数对账。
+ * 这个数字取 `MUTANTS.length`（清单真身），不是 `report.length`
+ * （后者还含收尾自检/覆盖率等非变异行）—— 声明必须来自库存本身，
+ * 否则"少跑了一条"时声明会跟着一起缩水，1/1 假绿又回来了。
+ */
+console.log(`MUTANT_TOTAL=${MUTANTS.length}`);
 console.log(failures === 0 ? '结论: 全部变异均被捕获，且还原可靠 ✓' : `结论: ${failures} 项未被捕获或还原失败 ✗`);
 process.exit(failures === 0 ? 0 : 1);

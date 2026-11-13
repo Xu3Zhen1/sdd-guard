@@ -15,14 +15,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { writableTempRoot } from '../lib/temp.mjs';
 import { runRules } from '../lib/runner.mjs';
 
 const FIXTURE = new URL('./fixtures/q1-base/', import.meta.url).pathname.replace(/^\//, '');
 
 /** 跑 C3：change 目录里放给定制品，diff 里放给定变更文件。 */
 function runC3({ proposal, design, tasks, specs, diffFiles }) {
-  const root = mkdtempSync(join(tmpdir(), 'q2v-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'q2v-'));
   cpSync(FIXTURE, root, { recursive: true });
   const cd = join(root, 'changes/x');
   mkdirSync(cd, { recursive: true });

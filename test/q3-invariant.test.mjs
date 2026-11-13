@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { writableTempRoot } from '../lib/temp.mjs';
 import { assertInvariant, invariantStats, resetInvariantStats } from '../lib/invariant.mjs';
 import { runRules, summarize } from '../lib/runner.mjs';
 
@@ -25,7 +25,7 @@ const EVIDENCE = {
 };
 
 function runAcceptance(evidence) {
-  const root = mkdtempSync(join(tmpdir(), 'q3-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'q3-'));
   try {
     const cd = join(root, 'changes', 'x');
     mkdirSync(cd, { recursive: true });

@@ -20,7 +20,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, cpSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writableTempRoot } from '../lib/temp.mjs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -133,7 +133,7 @@ const RECORDS = [];
 // P0 基线自证：探针夹具本身必须能过（否则后面所有 PASS 都无意义）
 // ─────────────────────────────────────────────────────────────
 test('P0 基线自证：夹具 + 合法声明 ⇒ PASS，且声明了 1 条路径', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sdd-q1-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'sdd-q1-'));
   cpSync(FIXTURE_BASE, root, { recursive: true });
   try {
     const r = runC3(root, BASE_TASK);
@@ -149,7 +149,7 @@ test('P0 基线自证：夹具 + 合法声明 ⇒ PASS，且声明了 1 条路�
 // P1 NOT_CHANGING：'不适用' 等词做**整条块**包含匹配 ⇒ 能局部修饰真修改
 // ─────────────────────────────────────────────────────────────
 test('P1 NOT_CHANGING：局部修饰词吞掉整条真修改（FIXED · 2026-11-13 修复后应 HOLD）', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sdd-q1-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'sdd-q1-'));
   cpSync(FIXTURE_BASE, root, { recursive: true });
   try {
     const rec = pair(root, {
@@ -182,7 +182,7 @@ test('P1 NOT_CHANGING：局部修饰词吞掉整条真修改（FIXED · 2026-11-
 });
 
 test('P1 NOT_CHANGING：更短的局部修饰「不需要修改」同样生效（FIXED · 2026-11-13 修复后应 HOLD）', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sdd-q1-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'sdd-q1-'));
   cpSync(FIXTURE_BASE, root, { recursive: true });
   try {
     const rec = pair(root, {
@@ -214,7 +214,7 @@ test('P1 NOT_CHANGING：更短的局部修饰「不需要修改」同样生效�
 // P2 RECON_HEAD：句首动词决定"是否要求被改"，兜底只查路径存在性
 // ─────────────────────────────────────────────────────────────
 test('P2 RECON_HEAD：句首写「确认」即脱离"必须被改"管辖（FIXED · 2026-11-13 修复后应 HOLD）', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sdd-q1-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'sdd-q1-'));
   cpSync(FIXTURE_BASE, root, { recursive: true });
   try {
     const rec = pair(root, {
@@ -252,7 +252,7 @@ test('P2 RECON_HEAD：句首写「确认」即脱离"必须被改"管辖（FIXED
 // P3 looksLikePath
 // ─────────────────────────────────────────────────────────────
 test('P3-a looksLikePath：路径含「--」被判成命令行 flag ⇒ 幽灵路径完全免检（FIXED · 2026-11-13 修复后应 HOLD）', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sdd-q1-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'sdd-q1-'));
   cpSync(FIXTURE_BASE, root, { recursive: true });
   try {
     const rec = pair(root, {
@@ -286,7 +286,7 @@ test('P3-a looksLikePath：路径含「--」被判成命令行 flag ⇒ 幽灵�
 });
 
 test('P3-b looksLikePath：无扩展名的真实文件声明要改却不改 ⇒ PASS（FIXED · 2026-11-13 修复后应 HOLD）', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sdd-q1-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'sdd-q1-'));
   cpSync(FIXTURE_BASE, root, { recursive: true });
   try {
     const rec = pair(root, {
@@ -317,7 +317,7 @@ test('P3-b looksLikePath：无扩展名的真实文件声明要改却不改 ⇒ 
 });
 
 test('P3-c 原构造未生效：第 91 行确实返回 false，但被 splitCommandPaths 兜住 ⇒ 不计为 HOLD', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sdd-q1-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'sdd-q1-'));
   cpSync(FIXTURE_BASE, root, { recursive: true });
   try {
     const cmd = 'node tools/build.mjs src/util/ghost-91.js';
@@ -359,7 +359,7 @@ test('P3-c 原构造未生效：第 91 行确实返回 false，但被 splitComma
 // P4 splitCommandPaths：按空白切分，不做引号感知
 // ─────────────────────────────────────────────────────────────
 test('P4 splitCommandPaths：含空格的幽灵路径三处通道全哑（FIXED · 2026-11-13 修复后应 HOLD）', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sdd-q1-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'sdd-q1-'));
   cpSync(FIXTURE_BASE, root, { recursive: true });
   try {
     const rec = pair(root, {
@@ -395,7 +395,7 @@ test('P4 splitCommandPaths：含空格的幽灵路径三处通道全哑（FIXED 
 // P5 toBlocks：列表项续行只认"两个空格"，单 Tab 直接丢行
 // ─────────────────────────────────────────────────────────────
 test('P5-a toBlocks：单 Tab 续行整行被丢弃 ⇒ 续行里的声明消失（FIXED · 2026-11-13 修复后应 HOLD）', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sdd-q1-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'sdd-q1-'));
   cpSync(FIXTURE_BASE, root, { recursive: true });
   try {
     const rec = pair(root, {
@@ -420,7 +420,7 @@ test('P5-a toBlocks：单 Tab 续行整行被丢弃 ⇒ 续行里的声明消失
 });
 
 test('P5-b toBlocks：续行里的「不适用」会连带吞掉父项的真修改（FIXED · 2026-11-13 修复后应 HOLD）', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sdd-q1-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'sdd-q1-'));
   cpSync(FIXTURE_BASE, root, { recursive: true });
   try {
     const rec = pair(root, {
@@ -452,7 +452,7 @@ test('P5-b toBlocks：续行里的「不适用」会连带吞掉父项的真修�
 // P6 codeScopes 反向检查：默认白名单之外的目录，新增文件完全不查
 // ─────────────────────────────────────────────────────────────
 test('P6 codeScopes：默认白名单外的目录偷偷加文件不报（FIXED · 2026-11-13 修复后应 HOLD）', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sdd-q1-'));
+  const root = mkdtempSync(join(writableTempRoot(), 'sdd-q1-'));
   cpSync(FIXTURE_BASE, root, { recursive: true });
   try {
     const rec = pair(root, {

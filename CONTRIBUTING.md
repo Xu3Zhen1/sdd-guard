@@ -47,7 +47,8 @@ node tools/check-publish.mjs --fix-lf
 **提交前自检（阻断式）**
 
 ```bash
-node tools/self-check.mjs     # 8 步：3 个测试 + 变异 + 契约漂移 + 证据 + 证据链 + 验收
+node tools/self-check.mjs     # 全部步骤：基础测试 + 七套专项 + 变异 + 契约漂移 + 发布前置
+                              #           + 覆盖率负控 + 证据生成 + 证据链 + 验收
 node tools/check-publish.mjs  # 脱敏 / LF / package.json 结构
 ```
 

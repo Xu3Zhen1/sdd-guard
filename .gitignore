@@ -4,6 +4,10 @@
 /evidence.json
 node_modules/
 npm-debug.log*
+# 自检产出的真实 diff（2026-11-13 加）：它是**门禁的中间产物**，
+# 若被 make-diff 当成"未跟踪变更"纳入，会让 DISCIPLINE-C1/C3 把自己的输入也算进变更集
+# —— 判据测的是"本次改动"，不该含"测量工具自己刚写出来的文件"。
+.selfcheck-diff.json
 
 # DSH 内部身份卡：属于本机工作区拓扑，不属于本仓库
 whoiam.md

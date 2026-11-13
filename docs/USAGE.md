@@ -51,9 +51,9 @@ node cli.mjs check --change changes/<变更名> --profile process --repo . --con
 
 | 档位 | 包含哪些判据 | 什么时候跑 | 必须给的额外输入 |
 |---|---|---|---|
-| `process` | 11 条（proposal / specs / design / tasks 阶段） | 写作过程中反复跑 | 无 |
-| `acceptance` | 12 条（代码阶段 + 证据判据） | 交付前跑一次 | `--evidence <file>` |
-| `all` | 全部 23 条 | 不带 `--profile` 时的默认值 | 同 acceptance |
+| `process` | 11 条 = 7 机器 + 4 人工（proposal / specs / design / tasks 阶段） | 写作过程中反复跑 | 无 |
+| `acceptance` | 12 条 = 10 机器 + 2 人工（代码阶段 + 证据判据） | 交付前跑一次 | `--evidence <file>` |
+| `all` | 全部 23 条 = 17 机器 + 6 人工 | 不带 `--profile` 时的默认值 | 同 acceptance |
 
 `acceptance` 档缺 `--evidence` 会直接退出码 2 —— 它不接受「没证据就算合格」。
 
@@ -188,13 +188,16 @@ node tools/make-evidence.mjs --out evidence.json
 两件事必须做：
 
 ```bash
-# ① 一键自检（10 步，与 CI 完全等价：三套测试 + 变异 + 契约漂移 + 发布前置
-#    + 覆盖率守卫负控 + 生成证据 + 证据链 + 验收档）
+# ① 一键自检（按三类范围声明：工具健康 / 自举流程 / 交付检查；
+#    含基础测试 + 七套专项 + 变异 + 契约漂移 + 发布前置 + 覆盖率守卫负控
+#    + 生成证据 + 证据链 + 验收档）
 node tools/self-check.mjs
 
 # ② 或者分开跑，并加上覆盖率下限
 node cli.mjs check --change changes/<名> --profile process --repo . --min-coverage 0.8
 ```
+
+> **别把"自检绿"读成"CI 绿"**（2026-11-13 审计 A08）：`self-check` 覆盖的是 CI 里那条**单机命令链**，并由 `check-contract` 结构化断言两者同步；但 CI 还跑 **ubuntu × windows × Node 20/22/24 六环境矩阵**，那些差异只有 CI 真跑才知道。旧文案「与 CI 完全等价」是过度承诺，已改。
 
 **`--min-coverage` 为什么建议加**：不加时，一个什么都没写的 change 目录会得到「通过 1 · 失败 0 · 跳过 16」而退出码 0 —— 「什么都没做」与「全部通过」不可区分。
 
@@ -209,10 +212,28 @@ node cli.mjs check --change changes/<名> --profile process --repo . --min-cover
 | `node cli.mjs --help` | 打印全部参数（由 `lib/contract.mjs` 生成，不会与实现漂移） |
 | `node cli.mjs check --only <ids>` | 只跑指定判据，逗号分隔；含未知 id ⇒ 退出码 2 |
 | `--strict` | `MANUAL` 也算失败 |
-| `node tools/check-contract.mjs` | 校验文档与实现是否漂移（52 项检查） |
+| `node tools/check-contract.mjs` | 校验文档与实现是否漂移（当前 65 项检查，数字以脚本输出为准） |
 | `node tools/check-publish.mjs` | 发布前检查（脱敏等） |
 
 `--only` 的已知 id 用 `--help` 或看 `lib/rules.mjs` 的 `RULES`。写错 id 不会静默变成「跑了 0 条 ⇒ 全过」，而是退出码 2。
+
+### 装到别的项目里（分发边界，A15）
+
+```bash
+npx sdd-guard check --change changes/<名> --profile process --repo .
+```
+
+**包内可用**：`cli.mjs` + `lib/` + `templates/` + 默认配置 + 文档。
+**包内不可用（有意如此）**：`tools/self-check.mjs` 与 `tools/check-contract.mjs`。它们是**仓库专用工具**——
+
+| 工具 | 为什么装进包里也跑不起来 |
+|---|---|
+| `tools/self-check.mjs` | 要跑 `test/*.mjs`、要读 `changes/self-host-guard/`，这些不进包 |
+| `tools/check-contract.mjs` | 要解析 `.github/workflows/ci.yml` 与 `docs/ICD.md`，这些也不进包 |
+
+这两者在**安装包里**跑会 exit 1，那是**分发设计边界**，不是"缺依赖"。要自举检查 sdd-guard 自己，请克隆仓库而不是 `npm install`。
+
+**接进自己的 CI 时**，把它们换成你自己的测试/变异命令，喂给 `make-evidence`（见 §5）——sdd-guard 本来就要求证据由**你的**流程产出。
 
 ---
 
@@ -226,7 +247,8 @@ node cli.mjs check --change changes/<名> --profile process --repo . --min-cover
 - **`DISCIPLINE-C3` 的反向检查是名称匹配**：文档全文任意一处出现文件名即算「提过」，不判断上下文。所以「文档写了不修改它但实际改了」不会被发现。
 - **无豁免机制**（`equivalentMutants` 是唯一的显式豁免，且强制带 reason）、**无基线棘轮**（基线数字要自己抄进 proposal）、**无增量扫描缓存**。
 - **`codeScopes` 缺省全查**。升级到本版本后首次运行，如果突然多出「改了但文档没提」，那是原先被跳过的范围现在被检查了，不是新 bug。
-- 实测环境：Windows + Node 20/22/24（CI 另跑 ubuntu）。其他语言仓库未验证，只按 9 种后缀识别代码文件。
+- 实测环境：Windows + Node 24（CI 另跑 ubuntu × windows × Node 20/22/24 六环境矩阵）。其他语言仓库未验证，只按 10 种后缀识别代码文件。
+- **`KISS-C1` 的嵌套是词法级启发式**：它现在**左右括号严格配对**（对象右括号不会再扣控制流层数）、**每行取该行内最大控制深度**（单行紧凑写法不再漏计）、并维护块注释/字符串/模板串/正则的词法状态。但它不是 AST —— 非 JS 语言只有 Python 走缩进口径，其余按花括号近似；`switch` 的 `case` 不计层。**函数体算一层**（这是既有负控锁定的语义，不是新选的）。
 
 ---
 

@@ -6,9 +6,11 @@
 // 用法：node tools/check-contract.mjs
 // 退出码：0 = 无漂移；1 = 有漂移（逐条打印）
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writableTempRoot } from '../lib/temp.mjs';
 
 import { VERSION, STATUSES, EXIT_CODES, OPTIONS, CONFIG_DEFAULTS, REPEATABLE_KEYS, PROFILE_NAMES, EVIDENCE_KEYS, rulesForProfile, SWITCHES, SWITCH_CLASS } from '../lib/contract.mjs';
 import { EXIT as RUNNER_EXIT } from '../lib/runner.mjs';
@@ -18,6 +20,39 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ICD = join(ROOT, 'docs', 'ICD.md');
 const RULES = join(ROOT, 'lib', 'rules.mjs');
 const README = join(ROOT, 'README.md');
+
+/**
+ * 规格要求必须常跑的七套专项（审计 A07 / task-2）。
+ *
+ * ★ 这里**必须是一份独立的硬编码清单**，不能从 package.json 反推。
+ *   2026-11-13 试过反推，变异负控当场证明了那样是**自证**：
+ *   把 q4-5 从 package.json 删掉后，"要求"和"实际"一起消失了 ⇒ 检查照样绿（实测 exit 0）。
+ *   而缺陷正是"有人删掉了它"。
+ *
+ * 三份东西各司其职，互相印证（与本文件其它检查同一形状）：
+ *   · 这里  = 规格（谁要求这七套必须常跑）
+ *   · package.json scripts.test = 声明（唯一测试入口，人能看懂）
+ *   · self-check --print-steps  = 实际（真会被 spawn 的那些步骤）
+ * 任意两份对不上就判红。
+ *
+ * ★ 必须声明在模块顶部：下面的检查在顶层立即执行，放后面会撞 TDZ。
+ */
+const REQUIRED_SPECIALTY_TESTS = [
+  'test/q1-backdoor.test.mjs',
+  'test/q2-crossrule.test.mjs',
+  'test/q2-value.test.mjs',
+  'test/q3-invariant.test.mjs',
+  'test/q46-switch.test.mjs',
+  'test/q4-5-exit-signal.test.mjs',
+  'test/prove-multiroot.mjs',
+];
+
+/** 从 package.json 的 scripts.test 读出"声明的唯一测试入口"。 */
+function declaredTestFiles() {
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+  const raw = pkg.scripts?.test || '';
+  return { raw, files: [...new Set([...raw.matchAll(/node\s+([\w./-]+\.mjs)/g)].map((m) => m[1]))] };
+}
 
 const findings = [];
 const ok = (msg) => findings.push({ level: 'ok', msg });
@@ -35,15 +70,91 @@ const icd = readText(ICD, 'ICD.md');
 const rules = readText(RULES, 'lib/rules.mjs');
 const readme = readText(README, 'README.md');
 
-// ── 1. 退出码：contract vs runner vs ICD ─────────────────────
+// ── 1. 退出码：contract vs runner vs ICD vs CLI 实际行为 ─────
+//
+// ★ A08（审计 I-03）：旧实现只比 `['OK','FAIL','CONFIG']` 三个键，
+// 于是把 runner 的 `INCOMPLETE` 从 3 改成 1（语法有效）后本检查仍 53/53 全绿 ——
+// **遗漏键**本身就是"没检查"，而不是"检查了没问题"。
+//
+// 现在两层判据：
+//   ① 契约层：键集合必须完全相等（不是"包含"），且每个值相等；
+//   ② 行为层：真的起子进程跑 cli.mjs，断言 4 个退出码**实际**是 0/1/2/3。
+// 只做 ① 会漏掉"常量对了但 CLI 没用它"；只做 ② 会漏掉"CLI 对了但常量表缺键"。
+const EXIT_KEYS = ['OK', 'FAIL', 'CONFIG', 'INCOMPLETE'];
 {
-  const same = ['OK', 'FAIL', 'CONFIG'].every((k) => EXIT_CODES[k] === RUNNER_EXIT[k]);
-  if (same) ok(`退出码 contract 与 runner 一致: ${JSON.stringify(EXIT_CODES)}`);
-  else bad(`退出码不一致: contract=${JSON.stringify(EXIT_CODES)} runner=${JSON.stringify(RUNNER_EXIT)}`);
+  const contractKeys = Object.keys(EXIT_CODES).sort().join(',');
+  const runnerKeys = Object.keys(RUNNER_EXIT).sort().join(',');
+  if (contractKeys === runnerKeys) ok(`退出码键集合 contract 与 runner 完全相同: [${contractKeys}]`);
+  else bad(`退出码键集合不一致: contract=[${contractKeys}] runner=[${runnerKeys}]`);
+
+  const missing = EXIT_KEYS.filter((k) => !(k in EXIT_CODES) || !(k in RUNNER_EXIT));
+  if (missing.length) bad(`退出码缺少必需键: ${missing.join(', ')}（四态必须齐备）`);
+
+  // 值比较：逐个键，且**PIN 写死规格值** —— 不引用被测常量做期望值，
+  // 否则把两边一起改错时本判据恒真。
+  const SPEC = { OK: 0, FAIL: 1, CONFIG: 2, INCOMPLETE: 3 };
+  for (const [k, want] of Object.entries(SPEC)) {
+    if (EXIT_CODES[k] === want && RUNNER_EXIT[k] === want) ok(`退出码 ${k}=${want}（contract 与 runner 均符合规格）`);
+    else bad(`退出码 ${k} 漂移: 规格=${want} contract=${EXIT_CODES[k]} runner=${RUNNER_EXIT[k]}`);
+  }
 
   for (const [k, v] of Object.entries(EXIT_CODES)) {
     if (icd.includes(`\`${v}\``)) ok(`ICD 记录了退出码 ${v}(${k})`);
     else bad(`ICD 未记录退出码 ${v}(${k})`);
+  }
+
+  // ④ 行为层：真实子进程。三个不可区分的输入必须给出三种不同退出码。
+  const behaviour = probeExitCodes(ROOT);
+  if (behaviour.error) bad(`无法实测 CLI 退出码: ${behaviour.error}`);
+  else {
+    for (const [label, want, got] of behaviour.cases) {
+      if (got === want) ok(`CLI 实测退出码 ${label} = ${got}`);
+      else bad(`CLI 实测退出码 ${label} 应为 ${want}，实际 ${got}`);
+    }
+    // 负控：3 与 1 必须**可区分**（把 INCOMPLETE 并回 FAIL 时这条会红）
+    const inc = behaviour.cases.find((c) => c[0] === 'INCOMPLETE')?.[2];
+    const fl = behaviour.cases.find((c) => c[0] === 'FAIL')?.[2];
+    if (inc !== undefined && fl !== undefined && inc !== fl) ok(`INCOMPLETE(${inc}) 与 FAIL(${fl}) 在进程边界上可区分`);
+    else bad(`INCOMPLETE 与 FAIL 在进程边界上不可区分（同为 ${inc}）—— 两种失败信号又被合流了`);
+  }
+}
+
+/**
+ * 实测 cli.mjs 的四个退出码（真实子进程，stdio 重定向到文件，不用 PIPE）。
+ *
+ * 四个输入分别对应：OK（正常运行，无硬失败）/ FAIL（--strict 下有 MANUAL）/
+ * CONFIG（未知子命令）/ INCOMPLETE（覆盖率不足）。
+ * 空 change 目录在默认情况下不报 fail，所以 OK 与 INCOMPLETE 用同一目录、只差 `--min-coverage`，
+ * 这样两者的差异**只能**来自覆盖率分流 —— 是干净的单因子对照。
+ */
+
+function probeExitCodes(root) {
+  let tmp;
+  try {
+    tmp = mkdtempSync(join(writableTempRoot(), 'cc-exit-'));
+    const change = join(tmp, 'changes', 'empty-one');
+    mkdirSync(change, { recursive: true });
+    const cfg = join(tmp, 'guard.config.json');
+    writeFileSync(cfg, JSON.stringify({
+      maxNesting: 3, dupWindow: 6, dupMinChars: 40, yagniMinNonGoals: 3, dryMinReuse: 1,
+    }));
+    const run = (args) => {
+      const log = join(tmp, 'out.txt');
+      const r = spawnSync(`node cli.mjs ${args} > "${log}" 2>&1`, { cwd: root, shell: true, stdio: 'inherit' });
+      return r.status === null ? -1 : r.status;
+    };
+    const base = `check --change "${change}" --repo "${tmp}" --config "${cfg}"`;
+    const cases = [
+      ['OK', 0, run(base)],
+      ['FAIL', 1, run(`${base} --profile process --strict`)],
+      ['CONFIG', 2, run('nosuchsubcommand')],
+      ['INCOMPLETE', 3, run(`${base} --min-coverage 0.8`)],
+    ];
+    return { cases };
+  } catch (e) {
+    return { error: e.message };
+  } finally {
+    if (tmp) try { rmSync(tmp, { recursive: true, force: true }); } catch { /* 清理失败不影响结论 */ }
   }
 }
 
@@ -223,33 +334,185 @@ const readme = readText(README, 'README.md');
 
   // ── self-check 必须覆盖 CI 的每一条命令 ──────────────────
   //
-  // ★ 2026-11-13 实证：CI 含 check-publish，而 self-check 不含。
-  // 结果：连续 3 个提交 CI 红在该步，本地「一键自检」却全绿——
-  // 因为本地跑的命令集 ≠ CI 的命令集。
+  // ★ A08（审计 I-02 实证）：旧实现是 `scText.includes(f)` ——
+  //   把 self-check 里 `steps.push(run('publish', …))` 那一行**整行注释掉**后，
+  //   脚本名仍然以字符串形式留在注释里，于是 check-contract 仍报「覆盖了 CI 的全部 2 个脚本」，
+  //   而 self-check 实际已经少跑一步（9/9 exit 0）。**字符串出现 ≠ 语句执行。**
   //
-  // 「我没测到」与「它没问题」症状同形。这条检查把两者钉死：
-  // CI 加的每一步，self-check 里必须有对应调用，否则判 FAIL。
-  // 不给「以后再补」留口子 —— 漂移当场红。
-  {
-    const wfPath = join(ROOT, '.github/workflows/ci.yml');
-    if (!existsSync(wfPath)) {
-      bad('缺少 .github/workflows/ci.yml（无法核对 self-check 与 CI 是否等价）');
-    } else {
-      const wf = readFileSync(wfPath, 'utf8');
-      const scText = readFileSync(join(ROOT, 'tools/self-check.mjs'), 'utf8');
-      // CI 里被直接执行的 node 脚本（排除 self-check 自身，避免自指）
-      const invoked = new Set();
-      for (const m of wf.matchAll(/node\s+([\w./-]+\.mjs)/g)) {
-        const f = m[1];
-        if (!f.includes('self-check')) invoked.add(f);
-      }
-      const missing = [...invoked].filter((f) => !scText.includes(f));
-      if (missing.length) {
-        bad(`CI 跑了但 self-check 未覆盖: ${missing.join(', ')}（本地全绿 ≠ CI 全绿）`);
-      } else {
-        ok(`self-check 覆盖了 CI 的全部 ${invoked.size} 个脚本命令`);
-      }
+  //   修法不是把正则写得更聪明（注释、死分支、条件路径都还能骗过正则），
+  //   而是**让 self-check 报出自己的执行清单**：`--print-steps` 输出的每一项
+  //   都来自真正会被 spawn 的 step 对象；注释掉 push，这一项就不在清单里。
+  //   检查从此比对的是**数据**，不是文本。
+  //
+  //   同时 CI 侧也不再对整份 yaml 跑正则：先**结构化解析** run 步骤、
+  //   剔除 yaml 注释行（行首/前置空白的 `#`，不误删字符串内的 `#`），
+  //   再取其中真正被执行的 node 脚本。
+  checkCiEquivalence();
+}
+
+/**
+ * CI 等价性总入口。拆成四个子函数是为了守住 KISS-C1（≤3 层）——
+ * 这段判断若嵌套写在一起会到 6 层，判据会先判它自己红。
+ */
+function checkCiEquivalence() {
+  const wfPath = join(ROOT, '.github/workflows/ci.yml');
+  if (!existsSync(wfPath)) {
+    bad('缺少 .github/workflows/ci.yml（无法核对 self-check 与 CI 是否等价）');
+    return;
+  }
+  const ciScripts = extractCiNodeScripts(readFileSync(wfPath, 'utf8'));
+  if (ciScripts.error) {
+    bad(`无法解析 ci.yml 的 run 步骤: ${ciScripts.error}`);
+    return;
+  }
+  if (ciScripts.scripts.length === 0) {
+    bad('ci.yml 里解析出 0 个 node 脚本 —— 要么 workflow 空了，要么解析器失配（两种都不能算通过）');
+    return;
+  }
+  const steps = selfCheckSteps();
+  if (steps.error) {
+    bad(`无法取得 self-check 的执行清单: ${steps.error}`);
+    return;
+  }
+  const executed = new Set(steps.list.flatMap((s) => s.invokes));
+  checkCiCoveredBy(ciScripts.scripts, executed);
+  checkManifestHealthy(steps.list);
+  checkSpecialtyRegistered(executed);
+}
+
+/** CI 跑的每个脚本，都必须在 self-check 的执行清单里。 */
+function checkCiCoveredBy(ciScripts, executed) {
+  const missing = ciScripts.filter((f) => !executed.has(f));
+  if (missing.length) {
+    bad(`CI 跑了但 self-check 的执行清单里没有: ${missing.join(', ')}（本地全绿 ≠ CI 全绿）`);
+    return;
+  }
+  ok(`self-check 执行清单覆盖了 CI 的全部 ${ciScripts.length} 个 node 脚本: [${ciScripts.join(', ')}]`);
+}
+
+/**
+ * 清单自身的健康度：项数与"每项是否有断言内容"。
+ * 没有这一条，「把清单删到只剩 1 项」会让上面的覆盖检查变成恒真。
+ */
+function checkManifestHealthy(list) {
+  const empty = list.filter((s) => !s.invokes || s.invokes.length === 0);
+  if (list.length < 10) {
+    bad(`self-check 执行清单只有 ${list.length} 项（应有 10 项以上；清单被删空会让等价性检查恒真）`);
+    return;
+  }
+  ok(`self-check 执行清单共 ${list.length} 项，其中 ${empty.length} 项不引用任何脚本（自定义检查步）`);
+}
+
+/**
+ * 三份清单互相印证：规格（本文件）· 声明（package.json）· 实际（self-check 清单）。
+ *
+ * 任意两份对不上就判红。**只有"实际"这一份是运行时数据**，另两份是独立事实来源，
+ * 所以不能用其中一份去推导另一份 —— 那样删掉一处会让两边一起消失，检查恒真。
+ */
+function checkSpecialtyRegistered(executed) {
+  // ① 规格 vs 实际：规格要求的，必须真的会被执行
+  const notExecuted = REQUIRED_SPECIALTY_TESTS.filter((f) => !executed.has(f));
+  if (notExecuted.length) {
+    bad(`规格要求的专项未进入 self-check 常跑清单: ${notExecuted.join(', ')}（专项存在 ≠ 专项是门禁）`);
+  } else {
+    ok(`规格要求的 ${REQUIRED_SPECIALTY_TESTS.length} 套专项全部在 self-check 执行清单中`);
+  }
+  // ② 规格 vs 声明：唯一测试入口（package.json scripts.test）也必须包含它们
+  const declared = new Set(declaredTestFiles().files);
+  const notDeclared = REQUIRED_SPECIALTY_TESTS.filter((f) => !declared.has(f));
+  if (notDeclared.length) {
+    bad(`package.json 的 scripts.test（唯一测试入口）缺少专项: ${notDeclared.join(', ')}`);
+  } else {
+    ok(`package.json scripts.test 声明了全部 ${REQUIRED_SPECIALTY_TESTS.length} 套专项`);
+  }
+  // ③ 文件必须真实存在（防"清单写了但文件被删"）
+  const gone = REQUIRED_SPECIALTY_TESTS.filter((f) => !existsSync(join(ROOT, f)));
+  if (gone.length) bad(`清单引用的专项文件不存在: ${gone.join(', ')}`);
+}
+
+/**
+ * 从 ci.yml 结构化抽取"真正会被执行的 node 脚本"。
+ *
+ * 三条规则，各自对应一种旧实现的漏检形态：
+ *   ① **剔除注释**：yaml 的注释是行首（允许前导空白）的 `#`。
+ *      旧实现对整份文本跑 `/node\s+([\w./-]+\.mjs)/g`，注释掉的一行照样被数进来。
+ *      注意只在**行首**判 `#`：`run: echo "a # b"` 里的 `#` 不是注释。
+ *   ② **只看 run 步骤**：`uses:`、`env:`、注释块里的脚本名不算"会被执行"。
+ *   ③ **保留多行 `run: |` 的连续性**：块内每一行都是命令，也要逐行剔注释。
+ *
+ * 已知边界（写在这里而不是假装没有）：本函数不解析 yaml 的完整语法（无依赖），
+ * 用缩进 + 关键字的行级状态机。`if:` 条件、matrix 展开、shell 差异都不展开 ——
+ * 所以结论只能是"同步了当前的脚本步骤"，不是"等价于 CI 的六环境矩阵"。
+ */
+function extractCiNodeScripts(text) {
+  try {
+    const state = { scripts: [], inRun: false, runIndent: -1 };
+    for (const raw of text.split(/\r?\n/)) consumeYamlLine(state, raw);
+    return { scripts: [...new Set(state.scripts)] };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+/**
+ * 消费一行 yaml，维护 "当前是否在 run 块内" 的状态。
+ *
+ * 抽成函数是为了守住 KISS-C1：内联写法会到 5 层嵌套。
+ * 状态机本身很简单：在 run 块里就收集命令；遇到缩进回退就出块；遇到 `run:` 就入块。
+ */
+function consumeYamlLine(state, raw) {
+  const line = stripYamlComment(raw);
+  if (!line.trim()) return;
+  const indent = line.match(/^[ \t]*/)[0].length;
+  const trimmed = line.trim();
+  if (state.inRun) {
+    if (indent > state.runIndent) {
+      collectNodeScripts(trimmed, state.scripts);
+      return;
     }
+    state.inRun = false;
+  }
+  const m = trimmed.match(/^(?:-\s+)?run:\s*(.*)$/);
+  if (!m) return;
+  const inline = m[1].trim();
+  if (inline && !/^\||^>/.test(inline)) collectNodeScripts(inline, state.scripts);
+  state.inRun = true;
+  state.runIndent = indent;
+}
+
+/** 去掉 yaml 行注释：只在行首（可含前导空白）判定，避免误删字符串内的 `#`。 */
+function stripYamlComment(line) {
+  return /^\s*#/.test(line) ? '' : line;
+}
+
+/** 从一条命令里抽 node 脚本路径（排除 self-check 自身，避免自指）。 */
+function collectNodeScripts(command, into) {
+  for (const m of command.matchAll(/\bnode\s+(?:--[\w-]+\s+)*([\w./-]+\.mjs)/g)) {
+    if (!m[1].includes('self-check')) into.push(m[1]);
+  }
+}
+
+/**
+ * 取得 self-check 的真实执行清单（`--print-steps`）。
+ *
+ * 这一步是 A08 修复的核心：**不读源码文本，问它要数据**。
+ */
+function selfCheckSteps() {
+  try {
+    const tmp = mkdtempSync(join(writableTempRoot(), 'cc-steps-'));
+    const out = join(tmp, 'steps.json');
+    const r = spawnSync(`node tools/self-check.mjs --print-steps > "${out}" 2>&1`, {
+      cwd: ROOT, shell: true, stdio: 'inherit',
+    });
+    if (r.status !== 0) {
+      return { error: `--print-steps 退出码 ${r.status}（期望 0）` };
+    }
+    const list = JSON.parse(readFileSync(out, 'utf8'));
+    try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+    if (!Array.isArray(list)) return { error: '--print-steps 输出不是数组' };
+    return { list };
+  } catch (e) {
+    return { error: e.message };
   }
 }
 
