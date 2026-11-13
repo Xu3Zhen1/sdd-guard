@@ -220,6 +220,37 @@ const readme = readText(README, 'README.md');
     if (/process\.exit\(3\)/.test(sc)) ok('self-check 跳过验收时以退出码 3 留痕');
     else bad('self-check 跳过验收时未以退出码 3 留痕（仅文案不算可察觉）');
   }
+
+  // ── self-check 必须覆盖 CI 的每一条命令 ──────────────────
+  //
+  // ★ 2026-11-13 实证：CI 含 check-publish，而 self-check 不含。
+  // 结果：连续 3 个提交 CI 红在该步，本地「一键自检」却全绿——
+  // 因为本地跑的命令集 ≠ CI 的命令集。
+  //
+  // 「我没测到」与「它没问题」症状同形。这条检查把两者钉死：
+  // CI 加的每一步，self-check 里必须有对应调用，否则判 FAIL。
+  // 不给「以后再补」留口子 —— 漂移当场红。
+  {
+    const wfPath = join(ROOT, '.github/workflows/ci.yml');
+    if (!existsSync(wfPath)) {
+      bad('缺少 .github/workflows/ci.yml（无法核对 self-check 与 CI 是否等价）');
+    } else {
+      const wf = readFileSync(wfPath, 'utf8');
+      const scText = readFileSync(join(ROOT, 'tools/self-check.mjs'), 'utf8');
+      // CI 里被直接执行的 node 脚本（排除 self-check 自身，避免自指）
+      const invoked = new Set();
+      for (const m of wf.matchAll(/node\s+([\w./-]+\.mjs)/g)) {
+        const f = m[1];
+        if (!f.includes('self-check')) invoked.add(f);
+      }
+      const missing = [...invoked].filter((f) => !scText.includes(f));
+      if (missing.length) {
+        bad(`CI 跑了但 self-check 未覆盖: ${missing.join(', ')}（本地全绿 ≠ CI 全绿）`);
+      } else {
+        ok(`self-check 覆盖了 CI 的全部 ${invoked.size} 个脚本命令`);
+      }
+    }
+  }
 }
 
 // ── 输出 ────────────────────────────────────────────────────

@@ -188,7 +188,8 @@ node tools/make-evidence.mjs --out evidence.json
 两件事必须做：
 
 ```bash
-# ① 一键自检（8 步：三套测试 + 变异 + 契约漂移 + 生成证据 + 证据链 + 验收档）
+# ① 一键自检（10 步，与 CI 完全等价：三套测试 + 变异 + 契约漂移 + 发布前置
+#    + 覆盖率守卫负控 + 生成证据 + 证据链 + 验收档）
 node tools/self-check.mjs
 
 # ② 或者分开跑，并加上覆盖率下限

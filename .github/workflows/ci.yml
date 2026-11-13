@@ -36,7 +36,8 @@ jobs:
           git --version
           test -f package.json
 
-      # 8 步：3 个测试文件 + 变异 + 契约漂移 + 生产证据 + 证据链 + 验收档
+      # 10 步：3 个测试文件 + 变异 + 契约漂移 + 发布前置 + 覆盖率守卫负控
+      #        + 生产证据 + 证据链 + 验收档
       - name: self-check（自举：sdd-guard 检查自己）
         shell: bash
         run: node tools/self-check.mjs

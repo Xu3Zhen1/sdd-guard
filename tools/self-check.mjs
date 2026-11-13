@@ -13,10 +13,11 @@
 //   node tools/self-check.mjs --skip-acceptance    # 只跑测试/变异/漂移/证据
 
 import { EVIDENCE_KEYS } from '../lib/contract.mjs';
-import { readFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const LOG_DIR = join(ROOT, '.selfcheck');
@@ -71,6 +72,60 @@ steps.push(run('mutation', 'node test/mutation.mjs'));
 
 // ── 3. 契约漂移 ─────────────────────────────────────────────
 steps.push(run('contract', 'node tools/check-contract.mjs'));
+
+/**
+ * ── 3b. 发布前置（check-publish）────────────────────────────
+ *
+ * ★ 2026-11-13 补入。此前 self-check **不含**这一步，而 CI 含。
+ * 后果：连续 3 个提交 CI 红在本步（_work 报告里有本机绝对路径），
+ * 而本地「一键自检全绿」——因为本地跑的命令集 ≠ CI 的命令集。
+ *
+ * 「我没测到」与「它没问题」症状同形。把 CI 的每一步都搬进来，
+ * 「一键自检绿」才等价于「CI 绿」。
+ */
+steps.push(run('publish', 'node tools/check-publish.mjs'));
+
+/**
+ * ── 3c. 覆盖率守卫负控（空 change 必须判红）──────────────
+ *
+ * ★ 2026-11-13 补入。这是 CI 的第三步，同样此前只在 CI 里跑。
+ *
+ * 为什么要单独一步：`--min-coverage` 默认关闭（避免打断边写边查），
+ * 所以必须有一步证明「打开它之后真的能拦住空提交」——
+ * 否则这个守卫本身又是个没被验证过的死代码。
+ *
+ * 两个断言缺一不可：
+ *   ① 不开启 ⇒ 退出码 0（保持既有语义，不能擅自升级）
+ *   ② 开启   ⇒ 退出码非 0（守卫真的生效）
+ * 只测 ② 会把「守卫恒红」误判为合格；只测 ① 则测不到守卫。
+ */
+function coverageGuardNegativeControl() {
+  const started = Date.now();
+  const logFile = join(LOG_DIR, 'coverage-guard.txt');
+  const tmpRoot = join(tmpdir(), `sdd-covguard-${process.pid}`);
+  const changeDir = join(tmpRoot, 'changes', 'empty-one');
+  mkdirSync(changeDir, { recursive: true });
+  writeFileSync(join(tmpRoot, 'guard.config.json'), JSON.stringify({
+    maxNesting: 3, dupWindow: 6, dupMinChars: 40, yagniMinNonGoals: 3, dryMinReuse: 1,
+  }));
+  const base = `node cli.mjs check --change "${changeDir}" --repo "${tmpRoot}" --config "${tmpRoot}/guard.config.json"`;
+  const problems = [];
+  const noGuard = spawnSync(`${base} > "${logFile}" 2>&1`, { cwd: ROOT, shell: true, stdio: 'inherit' });
+  if (noGuard.status !== 0) problems.push(`不开启守卫时退出码应为 0，实际 ${noGuard.status}`);
+  const withGuard = spawnSync(`${base} --min-coverage 0.8 >> "${logFile}" 2>&1`, { cwd: ROOT, shell: true, stdio: 'inherit' });
+  if (withGuard.status === 0) problems.push('开启守卫后空 change 仍被放行（守卫失效）');
+  try { rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* 清理失败不影响结论 */ }
+  return {
+    name: 'coverage-guard',
+    command: '(空 change × 守卫开/关)',
+    exitCode: problems.length ? 1 : 0,
+    ok: problems.length === 0,
+    ms: Date.now() - started,
+    logFile,
+    tail: problems.length ? problems.join(' | ') : '未开启 ⇒ 0；开启 ⇒ 非 0',
+  };
+}
+steps.push(coverageGuardNegativeControl());
 
 // ── 4. 生产证据（用刚跑出来的真实结果，不是旧文件）──────────
 // 先删旧证据：否则 make-evidence 失败时，验收会拿上一次的 evidence.json 跑出假绿。
