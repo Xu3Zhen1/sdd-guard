@@ -77,7 +77,8 @@
 - `self-check 28/28 exit 0`（工具健康 20 · 自举流程 1 · 交付检查 7）
 - `check-contract 66/66 漂移 0`、17 套专项测试全绿、`spec-probe 38/38`、`mutation-selfproof 4/4`
 - 发布阻断 0；`DISCIPLINE-C3`（文档↔代码绑定）**PASS**：33 条声明全落地、53 个变更均有出处
-- 六环境矩阵 **6/6 success**：run `43453136896` @ `0f5cb93` 与 run `43455372979` @ `f823a08`（ubuntu/windows × Node 20/22/24）
+- 六环境矩阵 **6/6 success**（ubuntu/windows × Node 20/22/24，三次独立运行均绿）：
+  run `43453136896` @ `0f5cb93` · run `43455372979` @ `f823a08` · **run `43464814098` @ `bd26ef8`（最终提交）**
 
 **唯一未通过的机器判据**：`DISCIPLINE-C1` 的**行数预算**（7782 行 > 400），**已获人工批准一次性例外**（见 §六）。
 
@@ -97,7 +98,7 @@ Remove-Item Env:TMP,Env:TEMP -ErrorAction SilentlyContinue   # ← 第一版漏�
 node tools/self-check.mjs
 ```
 
-| 检查 | 修复前 | 第一版（单配置） | **当前（第四版）** | 命令 |
+| 检查 | 修复前 | 第一版（单配置） | **当前（第五版）** | 命令 |
 |---|---|---|---|---|
 | 一键自检 | 10/10，验收实际 7/10 | 22/22（后撤回） | **26/26，exit 0（两种 TMP 配置各跑一遍）** | `node tools/self-check.mjs` |
 | 契约漂移 | 53/53 | 66/66 | **66/66，漂移 0** | `node tools/check-contract.mjs` |
