@@ -135,7 +135,7 @@ node tools/make-evidence.mjs --out evidence.json
 | `dryMinReuse` | `1` | DRY-D1 复用清单最少路径数 |
 | `dependencies` | `{}` | KISS-D1 依赖登记表 |
 | `allowedPrefixes` | `[]` | DISCIPLINE-C1 允许改动的路径前缀 |
-| `maxDiffLines` | `400` | DISCIPLINE-C1 行数预算 |
+| `maxDiffLines` | **（无默认；不写 = 未启用）** | DISCIPLINE-C1 行数预算；`0` = 零行预算（禁止任何变更），与「未启用」不同 |
 | `boundaries` | `{}` | DECOUPLE-2 边界前缀表 |
 | `forbidImports` | `[]` | DECOUPLE-2 禁止的跨边界引用 |
 | `contractPrefixes` | `[]` | DECOUPLE-1 契约文件必须落的目录前缀 |

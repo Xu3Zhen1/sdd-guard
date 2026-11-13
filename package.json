@@ -27,7 +27,7 @@
   },
   "scripts": {
     "check": "node cli.mjs check",
-    "test": "node test/guard.test.mjs && node test/args.test.mjs && node test/evidence.test.mjs && node test/make-diff.test.mjs && node test/real-diff-notice.test.mjs && node test/spec/spec-probe.mjs && node test/spec/mutation-selfproof.mjs && node test/q1-backdoor.test.mjs && node test/q2-crossrule.test.mjs && node test/q2-value.test.mjs && node test/q3-invariant.test.mjs && node test/q46-switch.test.mjs && node test/q4-5-exit-signal.test.mjs && node test/prove-multiroot.mjs && node test/scan-roots.test.mjs && node test/contract-guard.test.mjs && node test/mutation.mjs",
+    "test": "node test/guard.test.mjs && node test/c1-budget.test.mjs && node test/args.test.mjs && node test/evidence.test.mjs && node test/make-diff.test.mjs && node test/real-diff-notice.test.mjs && node test/spec/spec-probe.mjs && node test/spec/mutation-selfproof.mjs && node test/q1-backdoor.test.mjs && node test/q2-crossrule.test.mjs && node test/q2-value.test.mjs && node test/q3-invariant.test.mjs && node test/q46-switch.test.mjs && node test/q4-5-exit-signal.test.mjs && node test/prove-multiroot.mjs && node test/scan-roots.test.mjs && node test/contract-guard.test.mjs && node test/mutation.mjs",
     "self-check": "node tools/self-check.mjs",
     "publish-check": "node tools/check-publish.mjs"
   },

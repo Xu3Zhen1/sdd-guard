@@ -230,7 +230,7 @@ node cli.mjs --help
 | `dryMinReuse` | int | `1` | `DRY-D1` 复用清单最少路径数 |
 | `dependencies` | object | `{}` | `KISS-D1` 期望被登记的依赖（key 为包名） |
 | `allowedPrefixes` | string[] | `[]` | `DISCIPLINE-C1` 允许变更的路径前缀（空 = 不校验） |
-| `maxDiffLines` | int | `400` | `DISCIPLINE-C1` 变更行数预算 |
+| `maxDiffLines` | int | （无默认；**未配置 = 未启用**） | `DISCIPLINE-C1` 变更行数预算；`0` = 零行预算（禁止任何变更），与「未启用」不同 |
 | `codeScopes` | string[] | `[]` | `DISCIPLINE-C3` 反向检查（改了但文档没提）的代码范围；空 = 全查 |
 | `minMutationRatio` | number | `0.8` | `ACCEPT-E2` 变异杀死率下限 |
 | `equivalentMutants` | array | `[]` | 等价变异声明 `[{id, reason}]`；从 `ACCEPT-E2` 分母扣除。**`reason` 必填**，缺则判 fail |
@@ -266,8 +266,20 @@ node cli.mjs --help
 ```
 
 - `path` 用于 `allowedPrefixes` 前缀比较（`\` 归一为 `/`）。
-- `added + deleted` 汇总用于 `maxDiffLines`。
+- `added + deleted` 汇总用于 `maxDiffLines`；**该键不配置时不执行预算检查**（报告写明「行数预算未启用」）。
 - **空 `files` ⇒ `DISCIPLINE-C1` = skip**（空集不构成通过）。
+
+**「预算未启用」不等于「预算通过」**（2026-11-14 明确）：`DISCIPLINE-C1` 同时承担**范围检查**与**预算检查**，
+两者可独立启用。预算未配置时：
+
+| 情形 | C1 状态 | `detail` / `reason` 必须写明 |
+|---|---|---|
+| 预算未配、范围通过 | `pass` | `…均在范围内；行数预算未启用` |
+| 预算未配、发生越界 | `fail` | `N 项越界（预算未启用）` |
+| 预算与范围均未配 | `pass` | `…；范围检查与行数预算均未启用` |
+
+**这条规则的理由**：把「没检查」渲染成「检查过了没问题」，就是本项目最反对的假绿形态。
+所以未启用时必须写在 `detail` 里，读报告的人不能因为看到 `PASS` 就以为预算被检查过。
 
 **生成器**：`tools/make-diff.mjs`（2026-11-12 新增）。
 

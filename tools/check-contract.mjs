@@ -12,9 +12,10 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writableTempRoot } from '../lib/temp.mjs';
 
-import { VERSION, STATUSES, EXIT_CODES, OPTIONS, CONFIG_DEFAULTS, REPEATABLE_KEYS, PROFILE_NAMES, EVIDENCE_KEYS, rulesForProfile, SWITCHES, SWITCH_CLASS } from '../lib/contract.mjs';
+import { VERSION, STATUSES, EXIT_CODES, OPTIONS, CONFIG_DEFAULTS, CONFIG_SCHEMA, REPEATABLE_KEYS, PROFILE_NAMES, EVIDENCE_KEYS, rulesForProfile, SWITCHES, SWITCH_CLASS } from '../lib/contract.mjs';
 import { EXIT as RUNNER_EXIT } from '../lib/runner.mjs';
 import { REPEATABLE_KEYS as ARGS_REPEATABLE } from '../lib/args.mjs';
+import { stripComments } from '../lib/code.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ICD = join(ROOT, 'docs', 'ICD.md');
@@ -210,15 +211,31 @@ function probeExitCodes(root) {
 
 // ── 4. 配置键与默认值：contract vs rules.mjs 的 `??` 字面量 vs ICD ─
 {
-  const missingInIcd = Object.keys(CONFIG_DEFAULTS).filter((k) => !icd.includes(`\`${k}\``));
-  if (missingInIcd.length) bad(`ICD 未记录配置键: ${missingInIcd.join(', ')}`);
-  else ok(`ICD 记录了全部 ${Object.keys(CONFIG_DEFAULTS).length} 个配置键`);
+  /**
+   * ★ 完整性以 `CONFIG_SCHEMA` 为依据（旧实现遍历 `CONFIG_DEFAULTS`，取消 `maxDiffLines`
+   * 默认值后该键自动退出检查 —— 「消掉一项检查，还显示绿」）。
+   * 且须**先去注释**再搜源码：注释里含 `ctx.cfg.maxDiffLines ?? 400`，不去注释会报假红。
+   * 只认**首格恰好是键名**的表格行：ICD 另有 `| 预算字段（…） |`，更松的写法会让负控红不了。
+   */
+  const schemaKeys = Object.keys(CONFIG_SCHEMA);
+  const rulesCode = stripComments(rules);
+  const documented = new Set();
+  for (const row of icd.split('\n').filter((l) => l.trim().startsWith('|'))) {
+    const firstCell = (row.split('|')[1] || '').trim();
+    const m = firstCell.match(/^`([^`]+)`$/);
+    if (m) documented.add(m[1]);
+  }
+  const missingInIcd = schemaKeys.filter((k) => !documented.has(k));
+  if (missingInIcd.length) bad(`ICD 配置表未登记配置键: ${missingInIcd.join(', ')}（仅在正文提及名字不算登记）`);
+  else ok(`ICD 配置表登记了全部 ${schemaKeys.length} 个配置键（依据 CONFIG_SCHEMA，比对表格首列）`);
 
-  // 从 rules.mjs 抽 `cfg.<key> ?? <literal>` 与 `ctx.cfg.<key> ?? <literal>`
+  const orphanDefaults = Object.keys(CONFIG_DEFAULTS).filter((k) => !(k in CONFIG_SCHEMA));
+  if (orphanDefaults.length) bad(`CONFIG_DEFAULTS 有 schema 未声明的键: ${orphanDefaults.join(', ')}`);
+  else ok(`CONFIG_DEFAULTS 全部键均在 CONFIG_SCHEMA 内（无孤儿默认值）`);
+
   for (const [key, expected] of Object.entries(CONFIG_DEFAULTS)) {
     if (typeof expected === 'object') continue; // 对象/数组型没有 `??` 字面量可对
-    const re = new RegExp(`cfg\\.${key}\\s*\\?\\?\\s*([\\w.-]+)`);
-    const m = rules.match(re);
+    const m = rulesCode.match(new RegExp(`cfg\\.${key}\\s*\\?\\?\\s*([\\w.-]+)`));
     if (!m) {
       bad(`rules.mjs 里找不到 cfg.${key} 的默认值读取（契约声明默认 ${JSON.stringify(expected)}）`);
       continue;
@@ -228,7 +245,13 @@ function probeExitCodes(root) {
     else bad(`配置默认值漂移 ${key}: 契约=${expected} 实现=${actual}`);
   }
 
-  // ICD 表格里的默认值渲染（反引号包裹）必须与契约一致
+  // 声明"无默认值"的键：rules.mjs 不得再有该键的 `??`（否则隐式默认值偷偷回来）
+  for (const key of schemaKeys) {
+    if (key in CONFIG_DEFAULTS) continue;
+    if (new RegExp(`cfg\\.${key}\\s*\\?\\?`).test(rulesCode)) bad(`rules.mjs 仍给 ${key} 写了 \`??\` 默认值，但契约声明它无默认值（隐式默认值会偷偷回来）`);
+    else ok(`配置 ${key} 无默认值，rules.mjs 里也无 \`??\` 兜底（缺省=未启用）`);
+  }
+
   for (const [key, expected] of Object.entries(CONFIG_DEFAULTS)) {
     if (typeof expected === 'object') continue;
     const row = icd.split('\n').find((l) => l.includes(`\`${key}\``) && l.trim().startsWith('|'));
