@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
 import { PARSERS, PARSER_BY_KEY, buildEvidence, digest, digestShort } from '../lib/evidence.mjs';
+import { treeIdentity as treeIdentityImpl } from '../lib/tree.mjs';
 import { EVIDENCE_KEYS } from '../lib/contract.mjs';
 import { isNonNegInt, isStringArray } from '../lib/values.mjs';
 
@@ -72,54 +73,14 @@ function runToFile(command, cwd, outFile) {
 }
 
 /**
- * 跑 git 并把输出收进文件。
- * 同样用 shell 重定向（理由见 runToFile）。这里的参数**由本文件构造**、
- * 不含任何外部输入，所以走 shell 没有注入风险；git 子命令本身固定。
- * @returns {{ok:true,text:string}|{ok:false,reason:string}}
- */
-function gitToFile(repo, args, outFile) {
-  const cmd = `git ${args.map((a) => `"${a}"`).join(' ')}`;
-  const r = spawnSync(`${cmd} > "${outFile}" 2>&1`, { cwd: repo, shell: true, stdio: 'inherit' });
-  if (r.error) return { ok: false, reason: `git 不可用: ${r.error.message}` };
-  if (r.status !== 0) return { ok: false, reason: `git ${args.join(' ')} 退出码 ${r.status}` };
-  return { ok: true, text: readFileSync(outFile, 'utf8') };
-}
-
-/**
- * 代码树身份（A10 修）。
+ * 代码树身份采集（A10 修）。
  *
- * **为什么必须有**：证据只带"输出 sha256"时，它绑定的是**那一次输出的文本**，
- * 不是**产出该输出的代码树**。同一份 evidence.json 可以被贴到任意提交上说"我验过了"。
- *
- * 采集两项：`git rev-parse HEAD`（哪个提交）+ `git status --porcelain`（工作树脏不脏，
- * 脏的话必须留下脏的指纹 —— 否则"在改动未提交的树上跑出来的绿"会被当成该提交的绿）。
- *
- * **git 不可用时不得静默当作已绑定**：记 `{available:false, reason}`，
- * 让下游/人一眼看出这份证据没有代码树身份。
+ * **实现已抽到 `lib/tree.mjs`**：判据侧与工具侧必须按完全相同的语义读 `meta.tree`，
+ * 两处各写一份必然漂移，而"身份核对"上的漂移会让提示永远亮或永远不亮。
+ * 这里只做薄封装，保留原有调用签名。
  */
 function treeIdentity(repo, scratchDir) {
-  const headFile = join(scratchDir, 'git-head.txt');
-  const statusFile = join(scratchDir, 'git-status.txt');
-  const head = gitToFile(repo, ['rev-parse', 'HEAD'], headFile);
-  if (!head.ok) return { available: false, reason: head.reason };
-  const sha = head.text.trim();
-  if (!/^[0-9a-f]{40,64}$/.test(sha)) {
-    return { available: false, reason: `git rev-parse HEAD 输出不像提交号: ${JSON.stringify(sha.slice(0, 80))}` };
-  }
-  const st = gitToFile(repo, ['status', '--porcelain'], statusFile);
-  if (!st.ok) return { available: false, reason: `无法读取工作树状态: ${st.reason}` };
-  const statusText = st.text;
-  const dirtyLines = statusText.split('\n').filter((l) => l.trim());
-  return {
-    available: true,
-    head: sha,
-    headShort: sha.slice(0, 7),
-    dirty: dirtyLines.length > 0,
-    dirtyCount: dirtyLines.length,
-    // 工作树状态的摘要：dirty=true 的树上跑出来的证据**不能**当作该提交的验证。
-    statusSha256: digest(statusText),
-    statusSample: dirtyLines.slice(0, 20),
-  };
+  return treeIdentityImpl(repo, scratchDir);
 }
 
 function runStep(key, step, cwd, outDir, parserOpts) {

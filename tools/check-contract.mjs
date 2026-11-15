@@ -309,9 +309,91 @@ function probeExitCodes(root) {
   }
   if (icd.includes('make-evidence.mjs')) ok('ICD 写明了证据产出器');
   else bad('ICD 未写明证据产出器 make-evidence.mjs');
-  for (const k of ['command', 'exitCode', 'sha256']) {
-    if (icd.includes(`\`${k}\``)) ok(`ICD 记录了 provenance 字段 ${k}`);
-    else bad(`ICD 未记录 provenance 字段 ${k}`);
+
+  /**
+   * ★ 2026-11-15 修（父键名盲区）。
+   *
+   * 旧实现只断言 ICD 里出现过**裸字段名** `command` / `exitCode` / `sha256`：
+   *   if (icd.includes('`command`')) ok(...)
+   * 于是 ICD 把父键写成 `meta.provenance`（代码实际是 `meta.producers`）时，
+   * 三个裸字段名照样都在，**67/67 全绿**。
+   *
+   * 这是「`icd.includes` 太松」这一族的第二次复发：第一次是配置键
+   * （ICD 里另有一行「预算字段（maxDiffLines/dupMinChars）」让负控永远红不了），
+   * 改成「表格首格恰好等于键名」才修好。同一个教训在另一个位置又出现了一次。
+   *
+   * 现在的判据：**父键名与子字段名必须成对出现**。
+   * `PROVENANCE_PARENT` 是父键名的唯一真源，必须与 `lib/evidence.mjs`
+   * 实际产出、`lib/rules.mjs` 实际读取保持同一字符串。
+   */
+  const PROVENANCE_PARENT = 'meta.producers';
+  const PROV_SUBFIELDS = ['command', 'exitCode', 'sha256'];
+
+  /**
+   * ★ 判据必须是「结构定义」而不是「文本里提到过」。
+   *
+   * 第一版写成 `icd.includes(PROVENANCE_PARENT)`，负控立刻暴露问题：
+   * **删掉那行正式定义后检查仍然通过** —— 因为我自己写的"命名坑"说明段里
+   * 也提到了 `meta.producers`。这正是本项目反复踩的坑：
+   * **「文本里出现过」≠「文档定义了它」**。
+   *
+   * 现在的判据：父键名必须出现在**定义语境**里，三种任一即可：
+   *   ① 表格行（以 `|` 开头）—— 字段表 / 信任边界表
+   *   ② 列表项或编号项（以 `- ` / `<n>. ` 开头）—— 字段清单
+   *   ③ 反引号包裹的定义句（`` **`meta.producers`** `` 这种加粗定义）
+   * 说明段（`>` 引用块）与散文中提到，**不算定义**。
+   */
+  const definitionLines = icd.split('\n').filter((line) => {
+    const t = line.trim();
+    if (!t.includes(PROVENANCE_PARENT)) return false;
+    if (t.startsWith('>')) return false; // 说明/引用块不算定义
+    const isTableRow = t.startsWith('|');
+    const isListOrNumbered = /^([-*+]\s|\d+\.\s)/.test(t);
+    const isBacktickDefinition = new RegExp('\\*\\*`' + PROVENANCE_PARENT.replace('.', '\\.') + '`\\*\\*').test(t);
+    return isTableRow || isListOrNumbered || isBacktickDefinition;
+  });
+  if (definitionLines.length) {
+    ok(`ICD 在 ${definitionLines.length} 处定义语境（表格/清单/加粗定义）中记录了父键 ${PROVENANCE_PARENT}`);
+  } else {
+    bad(`ICD 没有在定义语境中记录证据父键 ${PROVENANCE_PARENT}（说明段里提到不算定义）`);
+  }
+
+  for (const k of PROV_SUBFIELDS) {
+    // 两个条件同时成立才算过：父键有**定义**，且子字段名在同一份文档里被反引号标注。
+    if (definitionLines.length && icd.includes(`\`${k}\``)) {
+      ok(`ICD 记录了 ${PROVENANCE_PARENT} 的子字段 ${k}`);
+    } else {
+      bad(`ICD 未在 ${PROVENANCE_PARENT} 下记录子字段 ${k}`);
+    }
+  }
+  // 反向：ICD 里不得出现已被证伪的父键名（防止改回来）。
+  /**
+   * ★ 只查**非说明性**的出现。
+   *
+   * 第一版直接 `icd.includes('meta.provenance')` ⇒ 我自己写的"命名坑"说明段
+   * （正文里点出「此前四处写作 `meta.provenance`」）立刻把检查判红。
+   * 这与本项目 2026-11-13 踩过的「检查器匹配到自己的注释」是同一族：
+   * **反例说明必须允许存在，否则就没法在文档里记录"曾经错在哪"。**
+   *
+   * 判据：逐行扫，排除 `>` 开头（说明块）与含"废弃/此前/曾/命名坑/已修"的行。
+   * 剩下的行里若仍有旧父键名 ⇒ 那是真的把错误写法当成正述在用。
+   */
+  const RETIRED_PARENT_NAMES = ['meta.provenance'];
+  const EXPLANATORY = /(废弃|此前|曾经|曾写|命名坑|已修|已改|旧实现|旧写法)/;
+  for (const rp of RETIRED_PARENT_NAMES) {
+    const offending = icd
+      .split('\n')
+      .map((line, i) => ({ line, no: i + 1 }))
+      .filter(({ line }) => line.includes(rp))
+      .filter(({ line }) => !line.trim().startsWith('>') && !EXPLANATORY.test(line));
+    if (offending.length) {
+      bad(
+        `ICD 仍把已废弃的父键 ${rp} 当作正述使用（代码实际为 ${PROVENANCE_PARENT}）：` +
+          offending.map((o) => `第${o.no}行`).join('、'),
+      );
+    } else {
+      ok(`ICD 未把废弃父键 ${rp} 当作正述使用（说明性提及不计）`);
+    }
   }
 
   if (readme.includes('tools/self-check.mjs')) ok('README 写明了 self-check 一键命令');

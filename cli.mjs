@@ -10,6 +10,7 @@ import { CODE_EXT, scanCodeRoots } from './lib/code.mjs';
 import { parseArgs } from './lib/args.mjs';
 import { renderHelp, PROFILE_NAMES, EVIDENCE_KEYS, OPTIONS, CONFIG_SCHEMA } from './lib/contract.mjs';
 import { missingEvidenceKeys } from './lib/evidence.mjs';
+import { compareTree, readTreeIdentity } from './lib/tree.mjs';
 import { validateConfig } from './lib/config.mjs';
 import { isPlainObject, isNonEmptyString, isRatio } from './lib/values.mjs';
 
@@ -69,6 +70,39 @@ function collectArgProblems(argv, args, strict) {
   if (stray.length && strict) problems.push(`多余的位置参数: ${stray.join(' ')}`);
 
   return problems;
+}
+
+/**
+ * 计算代码树提示。**不参与退出码**（见调用处注释）。
+ *
+ * 抽成模块级函数而非内联，原因有二：
+ *   ① 内联时 `if (args.json) {} else { if (treeNotice) { if (…) {} } }` 把
+ *      cli.mjs 的嵌套推到 4 层，**直接被本项目自己的 KISS-C1 判红**
+ *      （spec-probe A04-6 报的正是这一处 —— 判据抓到了我自己刚写的代码）；
+ *   ② 判定与渲染分开后，两者都能被单测直接调用，不必起子进程。
+ *
+ * @returns {{level:string,text:string}|null}  非 acceptance 档或无证据 ⇒ null
+ */
+function computeTreeNotice({ evidence, profile, repo }) {
+  if (!evidence || profile !== 'acceptance') return null;
+  return compareTree(evidence.meta && evidence.meta.tree, readTreeIdentity(repo));
+}
+
+/**
+ * 把树提示渲染成若干行文本。**nil 安全**：null ⇒ 空数组（不打印任何东西）。
+ *
+ * 为什么单独抽出来：`same` 是唯一不需要"仅作提示"脚注的档位，
+ * 这个判断若写在主流程里会再叠一层 if。
+ */
+function renderTreeNotice(treeNotice) {
+  if (!treeNotice) return [];
+  const mark = treeNotice.level === 'same' ? '✓' : '⚠';
+  const lines = [`  ${mark} 代码树: ${treeNotice.text}`];
+  const needsFootnote = treeNotice.level !== 'same' && treeNotice.level !== 'dirty-drift';
+  if (needsFootnote) {
+    lines.push('     （此项仅作提示，不改变退出码 —— 证据来源认证不在本工具边界内）');
+  }
+  return lines;
 }
 
 /**
@@ -344,6 +378,26 @@ function main() {
 
   const warnings = collectArgWarnings(args);
 
+  /**
+   * 代码树身份提示（**不参与退出码**）。
+   *
+   * 定位：`meta.tree` 是审计元数据，不是认证（ICD §5.2）。这里只回答
+   * 「你看的这份结论是在哪棵树上得出的」，不回答「这份结论对不对」——
+   * 后者是判据的事。所以：
+   *   · 它写进 `--json` 的 `treeNotice` 字段，但不改 `signal` / `exitCode`；
+   *   · 它只对**提供了 evidence 的档位**出现（process 档没有证据可核对）；
+   *   · 四种情况都给可区分文案，绝不统一说「可能过期」。
+   *
+   * 为什么必须有（2026-11-15 实测）：旧 evidence 记 head=eeba718，
+   * 在当前 b6d00a4 上跑 acceptance ⇒ ACCEPT-E* 全 PASS、EXIT=0。
+   * 记了 tree 却无人使用，与「没检查 ≠ 检查了没问题」是同族缺陷。
+   *
+   * ★ 计算与渲染都抽到模块级函数：内联时 `if/else` 里再套 `if` 会把
+   *   cli.mjs 的嵌套推到 4 层，直接触发本项目自己的 KISS-C1
+   *   （spec-probe A04-6 就是这么报出来的，判据抓到了我自己的代码）。
+   */
+  const treeNotice = computeTreeNotice({ evidence, profile, repo: ctx.repo });
+
   if (args.json) {
     console.log(
       JSON.stringify(
@@ -358,6 +412,7 @@ function main() {
           exitCode,
           strictArgs,
           warnings,
+          treeNotice,
           codeFiles: { count: ctx.codeFiles.length, roots: codeRoots, report: ctx.codeReport || null },
         },
         null,
@@ -369,6 +424,7 @@ function main() {
     console.log(`路径基准(repo): ${ctx.repo}`);
     console.log(`档位(profile): ${profile}${profile === 'all' ? '' : profile === 'process' ? '（开发流程）' : '（验收标准）'}`);
     console.log(formatText(results));
+    for (const line of renderTreeNotice(treeNotice)) console.log(line);
     if (scanErrors.length) {
       console.error(`  ⚠ 扫描收据：${scan.report.roots.length} 个 --code 根，候选 ${scan.report.candidates} 个源码文件，实际扫描 ${ctx.codeFiles.length} 个`);
       for (const e of scanErrors) console.error(`     · ${e}`);

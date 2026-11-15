@@ -347,16 +347,43 @@ sdd-guard 只读不算——同一进程既生产证据又判定证据，等于�
 | 三个顶层键必须存在（缺 ⇒ 退出码 2） | 不验证 evidence 确实由某个生产者跑出来（手写一份三键 JSON 也能过） |
 | 计数必须是非负安全整数（布尔/null/数组一律拒收） | 不认证调用方身份，不防伪造 |
 | 分项与总数自洽（`pass+fail ≤ tests`、`findings ≤ checks`、`killed+survived = total`） | 不做签名、不做可信执行身份 |
-| 变异清单**完整性**（报告须自证条目数，缺声明且带生产者痕迹 ⇒ FAIL） | 不保证 `meta.provenance` 未被改动 |
-| 记录 `meta.provenance`（命令/退出码/cwd/输出 sha256/代码树身份）供**审计** | 不保证该记录与真实执行一一对应 |
+| 变异清单**完整性**（报告须自证条目数，缺声明且带生产者痕迹 ⇒ FAIL） | 不保证 `meta.producers` 未被改动 |
+| 记录 `meta.producers`（命令/退出码/cwd/输出 sha256/代码树身份）供**审计** | 不保证该记录与真实执行一一对应 |
 
 **为什么不做认证**：抵御恶意调用方需要签名或可信执行身份，那是**安全系统**的职责，超出本工具已声明的范围。把工具扩成"未经定义的安全系统"会制造更大的假安全感。**要防伪造，请在 CI 层加执行身份；不要指望本工具认出来。**
 
-**`meta.provenance` 的定位**：它是**审计元数据**，不是认证。其中：
+**`meta.producers` 的定位**：它是**审计元数据**，不是认证。它是 `{ <证据键>: { command, exitCode, cwd, sha256, ... } }` 的映射——每个证据键对应一条生产者记录，由 `tools/make-evidence.mjs` 产出、`lib/rules.mjs` 与 `tools/self-check.mjs` 读取。其中：
 - `sha256` 是**完整 64 位**十六进制（旧实现只给 16 位前缀却写进名为 sha256 的字段——名实不符，已修）；
 - `runId` / `startedAt` / `finishedAt` 让"这份证据属于哪一次运行"可分辨；
 - `tree` 记录代码树身份（`git rev-parse HEAD` + 工作树脏度摘要）——**hash 绑定到输出不等于绑定当前代码树**，所以树身份单独记；
+
+> **`tree` 的读取方式（2026-11-15 补：记了必须有人读）**
+>
+> 此前 `meta.tree` **只写不读**：acceptance 门禁完全不看它，于是一份记着 `head=eeba718`
+> 的旧证据，可以在 `b6d00a4` 的仓库上让 ACCEPT-E1/E2/E3 全 PASS、`EXIT=0`。
+> ICD 已声明「不认证来源」，所以这不违反既有边界；但**「记了却没判」仍然是
+> 「没检查 ≠ 检查了没问题」的同族形态**——读者会以为"既然记了，至少查过吧"。
+>
+> 现在 `cli.mjs` 在 **acceptance 档且提供了 evidence** 时，会比对
+> `evidence.meta.tree` 与当前仓库，并在报告末尾打一行提示、在 `--json` 里写 `treeNotice`：
+>
+> | level | 含义 | 文案要点 |
+> |---|---|---|
+> | `same` | 同提交同脏度 | 显示 ✓ 一致 |
+> | `dirty-drift` | 同提交、脏度不同 | 带出两边脏项数 |
+> | `stale` | 提交不同 | **点名两边短号**，说明结论属于旧树 |
+> | `none` | 证据未记录 / 记录不可用 | 说明"未绑定任何提交" |
+> | `unknown` | 当前树读不到 | 说明"无法判断"，**不得写成一致** |
+>
+> ★ **这行提示不改变退出码**。它是审计线索，不是认证；把"不认证来源"偷偷升级成
+> "不一致就判红"同样是违约——那会让工具变成它自己声明不做的那类系统。
+> 文本报告里紧随提示的那句「此项仅作提示，不改变退出码」就是这条边界的显式声明。
 - git 不可用时记 `tree: {available:false, reason}`，**不静默当作已绑定**。
+
+> **命名坑（2026-11-15 修正）**：本文档此前四处写作 `meta.provenance`，而代码实际是 `meta.producers`。
+> 注意 `provenance` 这个词**仍然存在于代码里**，但它是**内层字段名**（`make-evidence.mjs` 里每条生产记录内部
+> 就叫 `provenance`），被塞进 `producers[key]`——所以"搜到 provenance 就对"是错的，父键名是 `producers`。
+> `<契约检查>` 已改为**父键名与子字段名成对断言**，且显式拒绝已废弃的 `meta.provenance` 写法。
 
 **失败时旧证据不可用（A10）**：`make-evidence` 在跑任何生产者**之前**先把旧输出隔离，成功后原子写（`tmp-<pid>` + rename）。所以"生成失败"之后不存在"当前输出"，旧文件无法冒充本次。
 
@@ -381,13 +408,13 @@ node tools/make-evidence.mjs --config evidence.config.json --out evidence.json
 
 1. 每条命令的输出**重定向到文件**再读（不捕获 stdout），原始输出保留在 `.evidence-raw/` 可人工复核。
 2. **命令退出码非 0 的处理是显式的**（2026-11-13 修正，旧文案「非零一律拒收」与实现不符）：
-   - 默认：**只要输出能被解析就采信**，退出码记入 `meta.provenance` 并作为 warning 保留。理由：如实报告"跑了 460、红的是 4 条"的生产者不该被整份拒收——那样连"红了 4 条"这个事实都留不下来。
+   - 默认：**只要输出能被解析就采信**，退出码记入 `meta.producers` 并作为 warning 保留。理由：如实报告"跑了 460、红的是 4 条"的生产者不该被整份拒收——那样连"红了 4 条"这个事实都留不下来。
    - 该步显式写 `requireZeroExit: true` 时：非零即拒收、不写入该证据。
    - **能不能解析**才是"可不可信"的分界线；"被测项目健不健康"由判据按解析结果裁决。
 3. 解析器找不到汇总行、或数字自相矛盾（`pass+fail>tests`、`passed+findings≠checks`）⇒ 抛错、整体失败。
 4. **多组汇总行是歧义，不是"取第一个"**（A09）：同一字段出现多组不同取值 ⇒ 抛错并列出每处行号；五个计数还必须聚在同一连续块内。
 5. **变异报告必须自证清单长度**（A09）：认 `MUTANT_TOTAL=<n>` / `变异总数：<n>` / `TOTAL=<n>`；声明与实测不符 ⇒ 抛错。无声明时 `completeness` 是 `'unknown'`（**不是**默认 complete），ACCEPT-E2 对带生产者痕迹的 unknown 判 FAIL。
-6. 成功时写入 `meta.provenance`：每条证据的 `command` / `exitCode` / `cwd` / `sha256`（**完整 64 位**输出指纹）/ `digest16`（供人读的短前缀）/ `bytes`，以及 `meta.runId` / `startedAt` / `finishedAt` / `tree`。
+6. 成功时写入 `meta.producers`（键为证据键 `tests`/`mutation`/`drift`，值为该条生产记录）：每条记录的 `command` / `exitCode` / `cwd` / `sha256`（**完整 64 位**输出指纹）/ `digest16`（供人读的短前缀）/ `bytes`，以及顶层的 `meta.runId` / `startedAt` / `finishedAt` / `tree`。
 7. 三个键不全 ⇒ 退出码 1，不写文件。失败时旧输出不可用（见 §5.2 信任边界末尾）。
 
 解析器（`lib/evidence.mjs`，纯函数，可单测）：`node-test` / `mutation` / `drift`。
