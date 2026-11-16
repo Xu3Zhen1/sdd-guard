@@ -9,6 +9,13 @@ npm-debug.log*
 # —— 判据测的是"本次改动"，不该含"测量工具自己刚写出来的文件"。
 .selfcheck-diff.json
 
+# 测试/探针的中间输出（2026-11-16 加）：
+# 变异探针会把 `check-contract` / `check-publish` 的输出重定向到 `.selfcheck-*.txt`
+# 再读回来判断结果。这些是**中间产物**，不该进仓库。
+# 实测踩过：`.selfcheck-icd-defaults.txt` 被误提交（88 行调试输出）。
+# 注意 `.selfcheck/` 那一条只覆盖**目录**，不覆盖同前缀的**散文件**。
+.selfcheck-*.txt
+
 # DSH 内部身份卡：属于本机工作区拓扑，不属于本仓库
 whoiam.md
 
