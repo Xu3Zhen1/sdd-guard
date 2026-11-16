@@ -290,6 +290,73 @@ function probeExitCodes(root) {
   }
 }
 
+/**
+ * 从 ICD 里解析**配置表**（`| 键 | 类型 | 默认 | 影响 |`）。
+ *
+ * ★ 必须限定范围。第一版扫全篇取"首格是反引号包裹的键"，反向检查立刻误报 5 个：
+ *   `tests`/`mutation`/`drift`（来自**证据键**表）、`art`（来自**制品**表）、
+ *   以及 `maxDiffLines`（另一张"预算字段"表也有它）。
+ *
+ *   教训与契约体检里 `--profile` 那次同族 —— **解析器必须先限定范围，再谈结论**。
+ *   扫全篇再判断"多余"，等于把别的表格当成本表。
+ *
+ * @returns {Map<string, {type:string, default:string}>}
+ */
+function parseConfigTable(icdText) {
+  const out = new Map();
+  let inTable = false;
+  for (const line of icdText.split('\n')) {
+    if (/\|\s*键\s*\|\s*类型\s*\|\s*默认\s*\|\s*影响\s*\|/.test(line)) {
+      inTable = true;
+      continue;
+    }
+    if (!inTable) continue;
+    if (!line.trim().startsWith('|')) {
+      inTable = false; // 表格段结束
+      continue;
+    }
+    if (/^\|[\s:|-]+\|$/.test(line.trim())) continue; // 分隔行
+    /**
+     * ★ 必须先处理**转义竖线 `\|`**。
+     *
+     * 实测踩过：`| \`testNesting\` | int \| null | \`null\` | … |`
+     * 天真的 `[^|]*` 会把 `int \` 当类型、把 `null` 当默认值 ——
+     * 于是 `docDefaultValue('null')` 恰好等于代码里的 `null`，
+     * **"把默认值从 null 改成 6"这个变异完全无法被察觉**。
+     *
+     * 修法：先把 `\|` 换成占位符（U+0001）再按 `|` 切分，切完再还原。
+     * 这样"类型列里的转义竖线"不会破坏列边界。
+     */
+    const cells = line
+      .replace(/\\\|/g, '\u0001')
+      .split('|')
+      .map((c) => c.replace(/\u0001/g, '|').trim());
+    // cells[0] 是行首空串，cells[1]=键，cells[2]=类型，cells[3]=默认
+    const keyM = (cells[1] || '').match(/^`([A-Za-z]\w*)`$/);
+    if (keyM) out.set(keyM[1], { type: cells[2] || '', default: cells[3] || '' });
+  }
+  return out;
+}
+
+/** 把代码里的默认值渲染成与文档同年份的写法。 */
+function renderDefault(v) {
+  if (v === null) return 'null';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
+
+/**
+ * 从 ICD"默认"单元格里抽出真正表示值的部分。
+ *
+ * 形如：`` `3` `` / `` `[]` `` / `` `null` `` / `（无默认；**未配置 = 未启用**）`
+ */
+function docDefaultValue(cell) {
+  const backtick = String(cell).match(/`([^`]+)`/);
+  if (backtick) return backtick[1].trim();
+  if (/无默认/.test(cell)) return '(无默认)';
+  return String(cell).trim();
+}
+
 // ── 4. 配置键与默认值：contract vs rules.mjs 的 `??` 字面量 vs ICD ─
 {
   /**
@@ -331,6 +398,30 @@ function probeExitCodes(root) {
     if (key in CONFIG_DEFAULTS) continue;
     if (new RegExp(`cfg\\.${key}\\s*\\?\\?`).test(rulesCode)) bad(`rules.mjs 仍给 ${key} 写了 \`??\` 默认值，但契约声明它无默认值（隐式默认值会偷偷回来）`);
     else ok(`配置 ${key} 无默认值，rules.mjs 里也无 \`??\` 兜底（缺省=未启用）`);
+  }
+
+  /**
+   * ★ 2026-11-16（契约体检最后一块）：核对 **ICD 表格里写的"默认"列**是否与代码一致。
+   *
+   * 上面几段核的都是 contract ↔ rules.mjs 的关系，**从没核对过 ICD 文档里的取值**。
+   * 于是这族缺陷完全无声：
+   *   文档写 `| maxNesting | int | 3 |`，代码里 `CONFIG_DEFAULTS.maxNesting = 4`
+   *   ⇒ 名字对得上、取值对不上，出现性检查（上面那段）**照样绿**。
+   *
+   * 这不是理论风险：使用者会按文档以为默认是 3，而实际跑的是 4，**且他不会去读代码**。
+   *
+   * ★ 解析必须**限定在配置表内**（第一版扫全篇，反向检查误报 5 个"多余行"——
+   *   `tests`/`mutation`/`drift` 来自证据键表、`art` 来自制品表）。
+   *   教训与 `--profile` 那次同族：**解析器必须先限定范围，再谈结论**。
+   */
+  const configTable = parseConfigTable(icd);
+  for (const [key, expected] of Object.entries(CONFIG_DEFAULTS)) {
+    const row = configTable.get(key);
+    if (!row) continue; // 缺行已由上面 `missingInIcd` 报过，不重复报
+    const docVal = docDefaultValue(row.default);
+    const realVal = renderDefault(expected);
+    if (docVal === realVal) ok(`ICD 写的默认值 ${key}=${realVal} 与代码一致`);
+    else bad(`ICD 写的默认值漂移 ${key}: 文档=${JSON.stringify(docVal)} 代码=${JSON.stringify(realVal)}`);
   }
 
   for (const [key, expected] of Object.entries(CONFIG_DEFAULTS)) {
