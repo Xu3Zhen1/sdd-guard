@@ -262,10 +262,12 @@ function main() {
     process.exit(EXIT.CONFIG);
   }
   // 扫描收据（A06）：一次扫描、两处复用 —— 执行前判错 + 报告里给候选/已扫/排除原因。
-  const scan = scanCodeRoots(codeRoots);
-  const scanErrors = scan.report.errors || [];
-
+  // ★ repo 必须在扫描**之前**解析：扫描要用它跑 `git check-ignore` 过滤（第 ② 位修复）。
+  //   若 repo 不可用（未指定 / 不是仓库），`applyGitignore` 会把原因写进收据的 `ignoreReason`，
+  //   **不会**静默当成"没有需要过滤的"。
   const repo = args.repo && args.repo !== true ? resolve(args.repo) : null;
+  const scan = scanCodeRoots(codeRoots, { repo });
+  const scanErrors = scan.report.errors || [];
 
   // --profile：未知档位 ⇒ 退出码 2；acceptance 缺证据 ⇒ 退出码 2（不能"无证据也验收通过"）
   const profile = args.profile && args.profile !== true ? String(args.profile) : 'all';
@@ -332,6 +334,8 @@ function main() {
     profile: 'all', // 已按档位筛过，不让 runner 再筛一次（二次筛会掩盖空集）
     rules: selected,
     codeReport: scan.report,
+    // ★ 直接传扫描结果，避免 runRules 内部再扫一次（两次扫描参数不同会让报告与实际不符）。
+    codeFilesIn: scan.files,
   });
   const summary = summarize(results);
 
