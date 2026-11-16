@@ -108,13 +108,28 @@ function renderTreeNotice(treeNotice) {
 /**
  * 警告级问题（不强制的宽松解析遗留）。它们**进 --json 的 trace**，
  * 这样"我拼错了选项"在机器可读结果里也看得见，而不是只留在 stderr 的一行字里。
+ *
+ * ★ 2026-11-16（契约体检发现）：旧实现 `if (near.length) warnings.push(...)`
+ *   **没有 else 分支** —— 找不到相近拼写的未知选项会被**完全静默丢弃**。
+ *
+ *   这与 `SWITCHES` 里 `strict-args` 的契约直接冲突：
+ *   契约写的是「关闭时只校验必需项，**宽松解析仍在 JSON 结果里留 trace**」。
+ *   实测：`--not-a-real-flag` 的 `warnings` 是 `[]` —— **契约承诺了 trace，而实际没有**。
+ *
+ *   这类"承诺了留痕却没留"比"直接报错"更危险：
+ *   使用者以为机器看见了那个参数，实际它凭空消失了。
  */
 function collectArgWarnings(args) {
   const warnings = [];
   for (const key of Object.keys(args)) {
     if (key === '_' || KNOWN.has(key)) continue;
     const near = [...KNOWN].filter((k) => levenshtein(k, key) <= 2);
-    if (near.length) warnings.push(`未知选项 --${key}，是否想写 --${near[0]}？`);
+    if (near.length) {
+      warnings.push(`未知选项 --${key}，是否想写 --${near[0]}？`);
+    } else {
+      // 没有相近建议也**必须留痕**（契约要求），否则就是静默丢弃。
+      warnings.push(`未知选项 --${key} 已被忽略（加 --strict-args 可让它直接失败）`);
+    }
   }
   return warnings;
 }
