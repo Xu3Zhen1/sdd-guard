@@ -59,6 +59,26 @@ const findings = [];
 const ok = (msg) => findings.push({ level: 'ok', msg });
 const bad = (msg) => findings.push({ level: 'fail', msg });
 
+/**
+ * 生成「README 分档计数漂移」的诊断文本（2026-11-16，第 3 项）。
+ *
+ * 单独成函数的原因：内联会形成 `for → if/else → if/else` 四层嵌套，
+ * 本项目的 KISS-C1 自举判据会当场判红（实测：`check-contract.mjs:323=4`）。
+ * **判据抓得对** —— 这段"先看总数对不对、再看机器/人工数"的分支值得单独命名。
+ *
+ * 为什么要区分两种失败：
+ *   · 总数对、机器/人工数不对 ⇒ 是**分类错误**（某条规则的 decidability 改了）；
+ *   · 总数都不对 ⇒ 是**没写**或**规则数量变了**。
+ *   两种修法不同，所以诊断必须分开。
+ */
+function describeCountDrift(name, real, claims) {
+  const sameTotal = claims.find((c) => c.total === real.total);
+  if (sameTotal) {
+    return `README ${name} 档的机器/人工数漂移: README=${sameTotal.machine}+${sameTotal.manual} 实际=${real.machine}+${real.manual}`;
+  }
+  return `README 未声明 ${name} 档计数（实际 ${real.total} = ${real.machine} 机器 + ${real.manual} 人工）`;
+}
+
 function readText(p, label) {
   if (!existsSync(p)) {
     bad(`${label} 不存在: ${p}`);
@@ -285,6 +305,40 @@ function probeExitCodes(root) {
   // 档位：两档必须完备、互斥，且 README 必须写出两档的名字与命令
   const proc = rulesForProfile(RULES, 'process');
   const acc = rulesForProfile(RULES, 'acceptance');
+
+  /**
+   * ★ 2026-11-16（第 3 项 · 契约体检未覆盖面）：**逐档核对 README 的计数声明**。
+   *
+   * 上面只核对了**总量**（`23 = 17 + 6`），而 README 还声明了**每档各自的数字**：
+   *   「四制品判据 … 11 条 = 7 机器 + 4 人工」
+   *   「代码级判据 + ACCEPT-E* … 12 条 = 10 机器 + 2 人工」
+   *
+   * 这两个数字**从来没人核对过**。契约体检时实测它们恰好正确，
+   * 但"恰好正确"与"有判据保证正确"是两件事 —— 前者下次加规则就漂了。
+   *
+   * 实现要点：README 的这两处声明**不在同一行**，所以要按「N 条 = M 机器 + K 人工」
+   * 全量抽取，再按**档位规则的机器/人工数**匹配（不按出现顺序 —— 顺序会因排版调整而变）。
+   */
+  const countRules = (rs) => ({
+    total: rs.length,
+    machine: rs.filter((r) => r.decidability === 'machine').length,
+    manual: rs.filter((r) => r.decidability === 'manual').length,
+  });
+  const claims = [...readme.matchAll(/(\d+)\s*条\s*=\s*(\d+)\s*机器\s*\+\s*(\d+)\s*人工/g)].map((x) => ({
+    total: Number(x[1]),
+    machine: Number(x[2]),
+    manual: Number(x[3]),
+    raw: x[0],
+  }));
+  for (const [name, rs] of [['process', proc], ['acceptance', acc]]) {
+    const real = countRules(rs);
+    const hit = claims.find(
+      (c) => c.total === real.total && c.machine === real.machine && c.manual === real.manual,
+    );
+    if (hit) ok(`README 写明了 ${name} 档计数: ${hit.raw}`);
+    else bad(describeCountDrift(name, real, claims));
+  }
+
   if (proc.length + acc.length !== total) bad(`档位不完备: process=${proc.length} + acceptance=${acc.length} ≠ ${total}`);
   else if (proc.some((r) => acc.includes(r))) bad('档位有交集：同一条规则同时属于 process 与 acceptance');
   else ok(`档位完备且互斥: process=${proc.length} · acceptance=${acc.length}`);

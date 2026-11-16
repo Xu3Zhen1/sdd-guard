@@ -84,6 +84,12 @@ const MUTATIONS = [
   ['`make-evidence.mjs` 改名', ICD, (t) => t.replace(/make-evidence\.mjs/g, 'makeev.mjs')],
   ['README 移除 `--profile process`', README, (t) => t.replace(/--profile process/g, '--profile proX')],
   ['README 移除 `tools/self-check.mjs`', README, (t) => t.replace(/tools\/self-check\.mjs/g, 'tools/sc2.mjs')],
+
+  // ★ 2026-11-16（第 3 项）：README 的**分档计数**此前从未核对过。
+  //   这两处声明各自独立、且与总量无关 —— 总量对了不代表分档对了。
+  ['README process 档机器数 7→8', README, (t) => t.replace('11 条 = 7 机器 + 4 人工', '11 条 = 8 机器 + 4 人工')],
+  ['README acceptance 档机器数 10→9', README, (t) => t.replace('12 条 = 10 机器 + 2 人工', '12 条 = 9 机器 + 2 人工')],
+  ['README 删掉 process 档计数声明', README, (t) => t.replace('**11 条 = 7 机器 + 4 人工**', '**若干条**')],
 ];
 
 for (const [label, file, fn] of MUTATIONS) {
