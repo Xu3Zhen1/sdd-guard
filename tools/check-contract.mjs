@@ -128,13 +128,16 @@ const EXIT_KEYS = ['OK', 'FAIL', 'CONFIG', 'INCOMPLETE'];
   const behaviour = probeExitCodes(ROOT);
   if (behaviour.error) bad(`无法实测 CLI 退出码: ${behaviour.error}`);
   else {
-    for (const [label, want, got] of behaviour.cases) {
-      if (got === want) ok(`CLI 实测退出码 ${label} = ${got}`);
-      else bad(`CLI 实测退出码 ${label} 应为 ${want}，实际 ${got}`);
+    for (const c of behaviour.cases) {
+      // ★ `code === -1` 表示**命令根本没执行**，与"退出码不符"是两种失败，必须分开报：
+      //   前者意味着这条判据整体无效（探针/环境坏了），后者意味着 CLI 行为漂移。
+      if (c.code === -1) bad(`CLI 实测退出码 ${c.label} 无法测得: ${c.why} —— 这条判据本次无效`);
+      else if (c.code === c.want) ok(`CLI 实测退出码 ${c.label} = ${c.code}`);
+      else bad(`CLI 实测退出码 ${c.label} 应为 ${c.want}，实际 ${c.code}`);
     }
     // 负控：3 与 1 必须**可区分**（把 INCOMPLETE 并回 FAIL 时这条会红）
-    const inc = behaviour.cases.find((c) => c[0] === 'INCOMPLETE')?.[2];
-    const fl = behaviour.cases.find((c) => c[0] === 'FAIL')?.[2];
+    const inc = behaviour.cases.find((c) => c.label === 'INCOMPLETE')?.code;
+    const fl = behaviour.cases.find((c) => c.label === 'FAIL')?.code;
     if (inc !== undefined && fl !== undefined && inc !== fl) ok(`INCOMPLETE(${inc}) 与 FAIL(${fl}) 在进程边界上可区分`);
     else bad(`INCOMPLETE 与 FAIL 在进程边界上不可区分（同为 ${inc}）—— 两种失败信号又被合流了`);
   }
@@ -149,6 +152,39 @@ const EXIT_KEYS = ['OK', 'FAIL', 'CONFIG', 'INCOMPLETE'];
  * 这样两者的差异**只能**来自覆盖率分流 —— 是干净的单因子对照。
  */
 
+/**
+ * 跑一条 CLI 命令，把结果分类成「真实退出码」或「无法测得」。
+ *
+ * ★ 2026-11-16 实测发现的假绿（见 `probeExitCodes` 的注释）：
+ *   原实现 `r.status === null ? -1 : r.status` 的 `null` 分支**几乎永不命中** ——
+ *   `cli.mjs` 不存在时 spawn 返回 **status=1**，与真实 FAIL 同形。
+ *   于是 `FAIL` 那条判据（期望 1）在命令从未执行的情况下仍报 ok。
+ *
+ * 修法：**证明"命令真的执行了"** —— 输出文件必须存在、非空，
+ * 且不含解释器级失败特征。因为**子进程失败与目标失败在退出码上同形**。
+ *
+ * 单独成函数的原因：内联会让 `probeExitCodes` 里出现 `try/if` 四层嵌套，
+ * 本项目的 KISS-C1 自举判据会当场判红（实测：`check-contract.mjs:190=4`）。
+ *
+ * @returns {{code:number, why:string}} `code === -1` 表示无法测得，`why` 给出原因
+ */
+function runAndClassify(root, tmp, args, spawnSync, readFileSync) {
+  const log = join(tmp, 'out.txt');
+  const r = spawnSync(`node cli.mjs ${args} > "${log}" 2>&1`, { cwd: root, shell: true, stdio: 'inherit' });
+  if (r.status === null) return { code: -1, why: 'spawn 失败（status=null）' };
+  let out = '';
+  try {
+    out = readFileSync(log, 'utf8');
+  } catch {
+    return { code: -1, why: '输出文件未生成' };
+  }
+  if (!out.trim()) return { code: -1, why: '命令无任何输出（疑似未真正执行）' };
+  if (/Cannot find module|ENOENT|is not recognized as an internal|command not found/i.test(out)) {
+    return { code: -1, why: '解释器/命令未找到（cli.mjs 可能不存在）' };
+  }
+  return { code: r.status, why: '' };
+}
+
 function probeExitCodes(root) {
   let tmp;
   try {
@@ -159,17 +195,42 @@ function probeExitCodes(root) {
     writeFileSync(cfg, JSON.stringify({
       maxNesting: 3, dupWindow: 6, dupMinChars: 40, yagniMinNonGoals: 3, dryMinReuse: 1,
     }));
-    const run = (args) => {
-      const log = join(tmp, 'out.txt');
-      const r = spawnSync(`node cli.mjs ${args} > "${log}" 2>&1`, { cwd: root, shell: true, stdio: 'inherit' });
-      return r.status === null ? -1 : r.status;
+    /**
+     * 跑一条命令，返回真实退出码；**命令根本没跑起来时返回 -1**。
+     *
+     * ★ 2026-11-16（第 1 项 · 子进程类判据变异体检）实测发现的缺陷：
+     *   原实现是 `r.status === null ? -1 : r.status` —— 那个 `null` 分支**几乎永远不命中**。
+     *   实测：`cli.mjs` 不存在时，无论 `shell:true` 还是 `shell:false`，
+     *   spawn 都返回 **status=1**（不是 null）。
+     *
+     *   后果按期望值分岔：
+     *     · 期望 ≠ 1（OK=0 / CONFIG=2 / INCOMPLETE=3）⇒ 侥幸红；
+     *     · **期望 = 1（FAIL）⇒ 命令从未执行，判据却报 ok** ⇒ **假绿**。
+     *   实测复现：把 `cli.mjs` 改名藏起来，输出里仍有
+     *   `ok  CLI 实测退出码 FAIL = 1`。
+     *
+     *   修法：**不看 status 是否为 null，而是看文件是否存在 + 输出里有没有解释器的报错特征**。
+     *   更稳的做法是"先证明这条命令真的执行了"：要求输出文件非空，
+     *   且不含 `Cannot find module` / `ENOENT` / `not recognized` 这类特征。
+     *   这比判断 status 可靠 —— 因为**子进程失败与目标失败在退出码上同形**。
+     */
+    const run = (args) => runAndClassify(root, tmp, args, spawnSync, readFileSync);
+    /**
+     * 收集一条用例。`code` 为 -1 时**单独成一条失败**，
+     * 不与"期望值不符"混为一谈 —— 因为这两种失败修法不同：
+     *   -1 是探针/环境坏了（可能整条判据无效）；
+     *   数值不符是 CLI 行为漂移。
+     */
+    const one = (label, want, args) => {
+      const { code, why } = run(args);
+      return { label, want, code, why };
     };
     const base = `check --change "${change}" --repo "${tmp}" --config "${cfg}"`;
     const cases = [
-      ['OK', 0, run(base)],
-      ['FAIL', 1, run(`${base} --profile process --strict`)],
-      ['CONFIG', 2, run('nosuchsubcommand')],
-      ['INCOMPLETE', 3, run(`${base} --min-coverage 0.8`)],
+      one('OK', 0, base),
+      one('FAIL', 1, `${base} --profile process --strict`),
+      one('CONFIG', 2, 'nosuchsubcommand'),
+      one('INCOMPLETE', 3, `${base} --min-coverage 0.8`),
     ];
     return { cases };
   } catch (e) {
