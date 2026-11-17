@@ -2,7 +2,7 @@
 // sdd-guard —— 把 YAGNI/KISS/DRY 里可机械判定的部分变成会 FAIL 的检查。
 // 退出码: 0=全过, 1=判据判定不合格, 2=输入/配置错误, 3=判据不可信或没跑完
 import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
-import { resolve, extname } from 'node:path';
+import { resolve, extname, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runRules, formatText, summarize, selectRules, EXIT, SIGNAL } from './lib/runner.mjs';
 import { RULES } from './lib/rules.mjs';
@@ -162,6 +162,22 @@ function readJsonFile(p, label) {
 }
 
 /**
+ * 解析一个 `--code` 路径（2026-11-18）。
+ *
+ * 绝对路径原样返回；相对路径**优先相对 `--repo`**，不存在才退回 cwd。
+ * 详见调用处注释里记录的实测缺陷。
+ */
+function resolveCodeRoot(p, repo) {
+  if (isAbsolute(String(p))) return resolve(String(p));
+  if (repo) {
+    const underRepo = resolve(repo, String(p));
+    // 只有真的存在才采纳，否则会把打错的路径变成"目录不存在"的报错
+    if (existsSync(underRepo)) return underRepo;
+  }
+  return resolve(String(p));
+}
+
+/**
  * 校验 `--code` 的每个根（A06）。
  *
  * 契约说 `--code` 是"代码根"，而 self-check 传的是 `cli.mjs` 这个**文件**；
@@ -268,19 +284,36 @@ function main() {
     process.exit(EXIT.CONFIG);
   }
 
-  const codeRoots = args.code
-    ? (Array.isArray(args.code) ? args.code : [args.code]).map((p) => resolve(p))
-    : [];
+  /**
+   * `--repo` 先解析（后续 `--code` 的基准要用它）。
+   *
+   * ★ 2026-11-18 修（真实外仓库采纳时实测暴露）：
+   *   旧实现对 `--code` 一律 `resolve(p)` —— **相对于 cwd**。
+   *   于是 `--repo <别的仓库> --code .` 会解析成**当前工作目录**（即 sdd-guard 自己），
+   *   扫描结果报「实检 206 个文件」而目标仓库只有 76 个 .js，
+   *   且"未检查"清单里出现的是 `sdd-guard/lib/rules.mjs` —— **扫了自家代码**。
+   *
+   *   这与用户直觉相反（`--code` 是"仓库里的代码根"，应相对 `--repo`），
+   *   而且**不报错、只给出错误结论**，属于最坏的一类。
+   *
+   *   现在的规则：
+   *     ① 绝对路径 ⇒ 原样使用
+   *     ② 给了 `--repo` 且相对路径在该 repo 下存在 ⇒ 相对 `--repo` 解析
+   *     ③ 否则 ⇒ 退回相对 cwd（兼容既有用法）
+   *   ②③ 的顺序保证向后兼容：只有当"相对 repo"真的解析得出东西时才优先它。
+   */
+  const repo = args.repo && args.repo !== true ? resolve(args.repo) : null;
+  const codeRoots = (args.code ? (Array.isArray(args.code) ? args.code : [args.code]) : [])
+    .map((p) => resolveCodeRoot(p, repo));
   const codeProblems = validateCodeRoots(codeRoots);
   if (codeProblems.length) {
     console.error(`--code 参数错误:\n  - ${codeProblems.join('\n  - ')}`);
     process.exit(EXIT.CONFIG);
   }
   // 扫描收据（A06）：一次扫描、两处复用 —— 执行前判错 + 报告里给候选/已扫/排除原因。
-  // ★ repo 必须在扫描**之前**解析：扫描要用它跑 `git check-ignore` 过滤（第 ② 位修复）。
+  // ★ repo 已经在上面解析好了：扫描要用它跑 `git check-ignore` 过滤。
   //   若 repo 不可用（未指定 / 不是仓库），`applyGitignore` 会把原因写进收据的 `ignoreReason`，
   //   **不会**静默当成"没有需要过滤的"。
-  const repo = args.repo && args.repo !== true ? resolve(args.repo) : null;
   const scan = scanCodeRoots(codeRoots, { repo });
   const scanErrors = scan.report.errors || [];
 
