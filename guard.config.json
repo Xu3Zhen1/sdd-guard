@@ -30,8 +30,8 @@
     { "where": "lib/temp.mjs:95", "reason": "finally 中的清理失败不应掩盖主异常" },
     { "where": "test/scan-roots.test.mjs:125", "reason": "测试夹具：清理临时目录失败不影响断言结论" },
     { "where": "test/spec/mutation-selfproof.mjs:35", "reason": "探针夹具：还原变异文件后的清理，失败不影响已记录的结果" },
-    { "where": "tools/check-contract.mjs:239", "reason": "finally 中的临时目录清理；主结论已在上方 return" },
-    { "where": "tools/check-contract.mjs:822", "reason": "finally 中的临时目录清理；主结论已在上方返回" },
+    { "where": "tools/check-contract.mjs:240", "reason": "finally 中的临时目录清理；主结论已在上方 return" },
+    { "where": "tools/check-contract.mjs:869", "reason": "finally 中的临时目录清理；主结论已在上方返回" },
     { "where": "tools/check-publish.mjs:56", "reason": "探测 git config 是否可用；不可用则不校验本机身份，属降级而非吞错" },
     { "where": "tools/make-diff.mjs:201", "reason": "finally 中的临时目录清理" }
   ]

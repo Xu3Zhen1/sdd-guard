@@ -21,6 +21,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ICD = join(ROOT, 'docs', 'ICD.md');
 const RULES = join(ROOT, 'lib', 'rules.mjs');
 const README = join(ROOT, 'README.md');
+const DESIGN_RATIONALE = join(ROOT, 'docs', 'DESIGN-RATIONALE.md');
 
 /**
  * 规格要求必须常跑的七套专项（审计 A07 / task-2）。
@@ -454,9 +455,55 @@ function docDefaultValue(cell) {
     bad('README 未按「N 条 = M 机器 + K 人工」格式声明判据数，无法校验');
   }
 
+  /**
+   * ★ 2026-11-18 加：**逐条 id 必须出现在 README 的逐条清单里**。
+   *
+   * 为什么这条必须补（实测踩过）：
+   *   上面那个正则只核「N 条 = M 机器 + K 人工」这个**计数串**。
+   *   README 顶部写 27 = 19 + 8（对的），分档计数也对，
+   *   但**逐条表格停在 19 条** —— ACCEPT-E1..E4、ARCH-06、ARCH-06-M、ARCH-07、ARCH-07-M
+   *   这 8 个 id 在 README 里**一次都没出现过**，而门禁全绿。
+   *
+   *   ⇒ 计数对 ≠ 枚举完备。这正是本工具自己反复强调的那条：
+   *     **报机械计数时必须证明枚举互斥且完备**，否则数字只是"看起来对"。
+   *
+   * 判据（两条都要成立）：
+   *   ① 每个 `id` 都以反引号形式出现在 README 里（避免只出现前缀被误判）
+   *   ② README 里不得出现**不存在的** rule id（防清单里留了已删除的规则）
+   */
+  const idMentioned = (id) => new RegExp('`' + id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '`').test(readme);
+  const missingIds = RULES.filter((r) => !idMentioned(r.id)).map((r) => r.id);
+  if (missingIds.length) {
+    bad(`README 逐条清单缺 ${missingIds.length} 条 rule id（计数对不等于枚举完备）: ${missingIds.join(', ')}`);
+  } else {
+    ok(`README 逐条清单覆盖全部 ${RULES.length} 条 rule id`);
+  }
+
+  // 反向：README 里不得出现 RULES 中不存在的 id（防清单陈旧）
+  const knownIds = new Set(RULES.map((r) => r.id));
+  const candidates = [...readme.matchAll(/`((?:YAGNI|KISS|DRY|DECOUPLE|ACCEPT|DISCIPLINE|ARCH)-[A-Z0-9]+(?:-[A-Z])?)`/g)]
+    .map((x) => x[1])
+    .filter((id) => !knownIds.has(id));
+  const staleIds = [...new Set(candidates)];
+  if (staleIds.length) bad(`README 提到 ${staleIds.length} 个不存在的 rule id: ${staleIds.join(', ')}`);
+  else ok('README 未提及任何已不存在的 rule id');
+
   // 档位：两档必须完备、互斥，且 README 必须写出两档的名字与命令
   const proc = rulesForProfile(RULES, 'process');
   const acc = rulesForProfile(RULES, 'acceptance');
+
+  /**
+   * ★ 2026-11-18 加：**DESIGN-RATIONALE.md 的数字也必须核**。
+   *
+   * 为什么（实测踩过）：这份文档 §9 明写「这些数字**由脚本核对**，不是手抄」，
+   * 但 `check-contract` 只 `readFileSync(README)`，**根本不打开这个文件**。
+   * 于是它自己声明的"由脚本核对"是空话，数字一路停在 23 条 / acceptance 12=10+2，
+   * 之后 6 个提交没人碰过，全文 0 次提及 ARCH。
+   *
+   * ⇒ 文档里的"由脚本核对"必须真的有一条脚本在核；否则就删掉那句话。
+   *   这里选前者（让声明成真），判据同 README：总数 + 两档分档数。
+   */
+  checkDesignRationale({ bad, ok, total, machine, manual, proc, acc });
 
   /**
    * ★ 2026-11-16（第 3 项 · 契约体检未覆盖面）：**逐档核对 README 的计数声明**。
@@ -828,6 +875,77 @@ function selfCheckSteps() {
 }
 
 // ── 输出 ────────────────────────────────────────────────────
+/**
+ * 核对 `docs/DESIGN-RATIONALE.md` 里的判据数字（2026-11-18 加）。
+ *
+ * ★ 为什么必须有这条（实测踩过）：
+ *   该文档 §9 明写「这些数字**由脚本核对**，不是手抄」，
+ *   而 `check-contract` 只 `readFileSync(README)`，**根本不打开这个文件**。
+ *   于是那句话是空话：数字一路停在「23 条（17+6）」「acceptance 12 = 10+2」，
+ *   之后 6 个提交没人碰过它，全文 0 次提及 ARCH。
+ *
+ *   这与 README 逐条清单漏 8 条同族：**文档声明了某种保证，但没有实现兑现它**。
+ *   两种处理：删掉那句声明，或让它成真。这里选后者。
+ */
+function checkDesignRationale({ bad, ok, total, machine, manual, proc, acc }) {
+  let text;
+  try {
+    text = readText(DESIGN_RATIONALE, 'docs/DESIGN-RATIONALE.md');
+  } catch {
+    bad('docs/DESIGN-RATIONALE.md 不存在或不可读（该文件自称数字由脚本核对，必须存在）');
+    return;
+  }
+  checkDesignVersionLine({ bad, ok, total, machine, manual }, text);
+  checkDesignTable({ bad, ok, total, machine, manual, proc, acc }, text);
+}
+
+/** ① 版本行：**版本**：YYYY-MM-DD · 对应 `lib/rules.mjs` N 条规则（M 机器 + K 人工） */
+function checkDesignVersionLine({ bad, ok, total, machine, manual }, text) {
+  const m = text.match(/对应 `lib\/rules\.mjs`\s*(\d+)\s*条规则（(\d+)\s*机器\s*\+\s*(\d+)\s*人工）/);
+  if (!m) { bad('DESIGN-RATIONALE 版本行未按「N 条规则（M 机器 + K 人工）」声明，无法校验'); return; }
+  const [t, mac, man] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (t === total && mac === machine && man === manual) ok(`DESIGN-RATIONALE 版本行判据数一致: ${t} = ${mac} + ${man}`);
+  else bad(`DESIGN-RATIONALE 版本行漂移: 文档=${t}=${mac}+${man} 实际=${total}=${machine}+${manual}`);
+}
+
+/** ②③ §9 表格：规则总数 + 档位分档数 */
+function checkDesignTable({ bad, ok, total, machine, manual, proc, acc }, text) {
+  const tot = text.match(/\|\s*规则总数\s*\|\s*(\d+)（机器\s*(\d+)\s*\+\s*人工\s*(\d+)）/);
+  if (!tot) { bad('DESIGN-RATIONALE §9 缺「规则总数 | N（机器 M + 人工 K）」行，无法校验'); return; }
+  const [t, mac, man] = [Number(tot[1]), Number(tot[2]), Number(tot[3])];
+  if (t === total && mac === machine && man === manual) ok(`DESIGN-RATIONALE §9 规则总数一致: ${t} = ${mac} + ${man}`);
+  else bad(`DESIGN-RATIONALE §9 规则总数漂移: 文档=${t}=${mac}+${man} 实际=${total}=${machine}+${manual}`);
+  checkDesignTiers({ bad, ok, total, proc, acc }, text);
+}
+
+/** §9 档位行：`process` P = M+H · `acceptance` A = M+H · `all` T */
+function checkDesignTiers({ bad, ok, total, proc, acc }, text) {
+  const m = text.match(/`process`\s*(\d+)\s*=\s*(\d+)\+(\d+)\s*·\s*`acceptance`\s*(\d+)\s*=\s*(\d+)\+(\d+)\s*·\s*`all`\s*(\d+)/);
+  if (!m) { bad('DESIGN-RATIONALE §9 档位行格式不匹配「`process` P = M+H · `acceptance` A = M+H · `all` T」'); return; }
+  const doc = {
+    proc: { total: +m[1], mac: +m[2], man: +m[3] },
+    acc: { total: +m[4], mac: +m[5], man: +m[6] },
+    all: +m[7],
+  };
+  const real = { proc: tierCounts(proc), acc: tierCounts(acc), all: total };
+  const same = (d, r) => d.total === r.total && d.mac === r.mac && d.man === r.man;
+  if (same(doc.proc, real.proc) && same(doc.acc, real.acc) && doc.all === real.all) {
+    ok(`DESIGN-RATIONALE §9 分档计数一致: process ${doc.proc.total}=${doc.proc.mac}+${doc.proc.man} · acceptance ${doc.acc.total}=${doc.acc.mac}+${doc.acc.man} · all ${doc.all}`);
+    return;
+  }
+  bad(`DESIGN-RATIONALE §9 分档计数漂移: 文档 process ${doc.proc.total}=${doc.proc.mac}+${doc.proc.man} / acceptance ${doc.acc.total}=${doc.acc.mac}+${doc.acc.man}；`
+    + `实际 process ${real.proc.total}=${real.proc.mac}+${real.proc.man} / acceptance ${real.acc.total}=${real.acc.mac}+${real.acc.man}`);
+}
+
+/** 统计一档的 `{total, mac, man}`。 */
+function tierCounts(rules) {
+  return {
+    total: rules.length,
+    mac: rules.filter((r) => r.decidability === 'machine').length,
+    man: rules.filter((r) => r.decidability === 'manual').length,
+  };
+}
+
 const fails = findings.filter((f) => f.level === 'fail');
 for (const f of findings) {
   if (f.level === 'fail') console.log('  FAIL  ' + f.msg);

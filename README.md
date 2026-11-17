@@ -23,6 +23,50 @@
 
 合计 **27 条 = 19 机器 + 8 人工**。
 
+### 逐条清单
+
+**这张表由 `check-contract` 校验**：每个 `id` 都必须在这里出现，否则门禁报红
+（2026-11-18 加 —— 此前它只核「N 条 = M 机器 + K 人工」这个计数串，
+逐条清单漏了 8 条也没人发现，与本工具反复强调的「报机械计数要证明枚举完备」是同一族）。
+
+| 档 | ID | 判定 | 查什么 |
+| :-- | :-- | :-- | :-- |
+| process | `YAGNI-P1` | machine | 提案必须显式声明「不做的事」，且每条带理由 |
+| process | `YAGNI-P2` | manual | 非目标是否真的被裁掉（而非只是没写） |
+| process | `KISS-S1` | machine | 每条 Requirement 至少一个 Scenario，且 GIVEN/WHEN/THEN 齐全 |
+| process | `KISS-S2` | machine | 单个 Scenario 只描述一个行为（禁止一个场景多条 THEN） |
+| process | `KISS-D1` | machine | 新增第三方依赖必须逐个登记「标准库为什么不行」 |
+| process | `KISS-D2` | manual | 架构是否过度设计（模式、分层、抽象是否被任务真正需要） |
+| process | `DRY-D1` | machine | 复用清单必须是真实存在的路径，不能只写「已检索」 |
+| process | `DRY-T1` | machine | 任务引用的文件路径必须存在，或显式标注为新建 |
+| process | `DRY-T2` | manual | 任务拆解是否需要先抽公共函数再继续 |
+| process | `DECOUPLE-1` | machine | 设计必须声明「接口契约真源」，且路径真实存在 |
+| process | `DECOUPLE-3` | manual | 契约是否覆盖了所有跨端通道（字段/错误码/分页/枚举/空值语义） |
+| acceptance | `ACCEPT-E1` | machine | 测试证据：全绿且样本非空 |
+| acceptance | `ACCEPT-E2` | machine | 变异证据：杀死率 ≥ `minMutationRatio` |
+| acceptance | `ACCEPT-E3` | machine | 契约漂移证据：零漂移 |
+| acceptance | `ACCEPT-E4` | manual | 未被执行的分支是否已显式报告（自曝） |
+| acceptance | `DECOUPLE-2` | machine | 前后端不得直接引用对方内部路径（import 边界） |
+| acceptance | `KISS-C1` | machine | 嵌套深度不得超过 `maxNesting` 层 |
+| acceptance | `DRY-C1` | machine | 跨文件连续 `dupWindow` 行规范化重复 |
+| acceptance | `YAGNI-C1` | machine | 代码中不得出现投机性标记（预留 / 将来扩展 / 暂未使用等） |
+| acceptance | `DISCIPLINE-C1` | machine | 变更必须落在声明范围内，且行数不超过预算 |
+| acceptance | `DISCIPLINE-C2` | machine | 工作区根不得堆积临时产物（pip-* / 随机 tmp* / cdp-profile-* / diag-*） |
+| acceptance | `DISCIPLINE-C3` | machine | 文档声明的文件必须出现在实际变更里（文档↔代码绑定） |
+| acceptance | `KISS-C2` | manual | 现有依赖是否可替代本次新增的抽象 |
+| acceptance | `ARCH-06` | machine | 循环必须有可终止的退出路径（恒真条件必须有**作用于本循环**的 break/return/throw） |
+| acceptance | `ARCH-06-M` | manual | 事件监听器是否包含防重入锁 |
+| acceptance | `ARCH-07` | machine | `catch` 块不得**体完全为空**（真空吞异常） |
+| acceptance | `ARCH-07-M` | manual | 基础系统异常是否被静默吞掉；业务拦截器是否修改系统核心状态 |
+
+### 三条明确的能力边界（不当作通过）
+
+| 边界 | 说明 |
+| :-- | :-- |
+| `ARCH-06` 不判**可达性** | `if (false) break;` 仍算有出口（需常量传播/控制流分析） |
+| `ARCH-06`/`ARCH-07` 不覆盖 **Go / Rust** | `loop {}` / `for {}` 无入口；已从结构可判列表移除，报告计作"未检查" |
+| 词法器不可信时**报 skip** | 手写状态机在嵌套模板串/正则密集的文件上可能失配；自检不过则不给结论 |
+
 ## 两套档位：开发流程 ≠ 验收标准
 
 | | `--profile process` | `--profile acceptance` |
