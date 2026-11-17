@@ -95,27 +95,40 @@ test('★ 负控：有语句的 catch **不得**报（可能是刻意的降级�
   }
 });
 
-test('★ 豁免：登记后不再报，且键是 `relPath:line`', () => {
+/**
+ * ★ 2026-11-18 改：豁免不再在 `emptyCatches` 内部过滤。
+ *
+ * 旧测试断言 `emptyCatches(rel, code, new Set([key]))` 返回空 —— 那是
+ * 「扫描器做过滤」的旧结构。现在职责分开（扫描器只负责**找**，
+ * `rules.mjs` 负责**判**），所以这里改为断言**扫描器返回带锚点的全部命中**，
+ * 而"豁免是否生效"由 `test/exempt-anchor.test.mjs` 与
+ * `test/arch-rules.test.mjs` 经 `RULES.run` 真实路径验证。
+ *
+ * 保留本条的意义：**证明扫描器不再吞掉任何命中**。
+ * 若它还做过滤，"谁被豁免了"就藏进扫描器，无法审计。
+ */
+test('★ 扫描器不做豁免过滤：永远返回全部命中（含锚点）', () => {
   const code = `try { x(); } catch { }`;
-  const hits = emptyCatches('lib/temp.mjs', code, new Set());
-  assert.equal(hits.length, 1);
-  const key = hits[0].key;
-  assert.match(key, /^lib\/temp\.mjs:\d+$/, `豁免键必须是 relPath:line，实际 ${key}`);
-  assert.deepEqual(emptyCatches('lib/temp.mjs', code, new Set([key])), [], '登记豁免后不应再报');
+  const hits = emptyCatches('lib/temp.mjs', code);
+  assert.equal(hits.length, 1, '扫描器必须如实返回命中，不得因豁免而少报');
+  const h = hits[0];
+  assert.match(h.key, /^lib\/temp\.mjs:\d+$/, `key 应是 relPath:line（仅供人读），实际 ${h.key}`);
+  assert.equal(typeof h.snippet, 'string', '必须带内容锚点 snippet');
+  assert.match(h.snippet, /catch \{ \}/, `锚点应包含 catch 块，实际 ${JSON.stringify(h.snippet)}`);
 });
 
-test('★★ 命脉：豁免键用绝对路径会失效（第一版就是这个 bug）', () => {
-  // 实测踩过：调用方传了绝对路径做键，而配置里写的是 `lib/temp.mjs:95` ⇒
-  // 两者永不相等 ⇒ **配了豁免仍报红**。
+test('★★ 命脉：锚点里**不含行号信息**（否则改行就失效）', () => {
+  // 这是本轮的核心回归：旧机制以 `relPath:line` 作唯一身份，
+  // 文件靠前处加代码后 `:239`→`:240`，全部豁免静默失效。
+  // 现在 snippet 必须是纯代码文本 —— 前插 50 行不该改变它。
   const code = `try { x(); } catch { }`;
-  const hits = emptyCatches('lib/temp.mjs', code, new Set());
-  const rightKey = hits[0].key;
-  // ★ 绝对路径必须**运行时拼接**：写成字面量会被 check-publish 判为主机路径泄漏
-  //   （实测踩过，2 个阻断项）。
-  const wrongKey = ['F:', 'DSH', 'AIcode', 'sdd-guard', 'lib', 'temp.mjs'].join('\\') + ':3';
-  const stillBad = emptyCatches('lib/temp.mjs', code, new Set([wrongKey]));
-  assert.equal(stillBad.length, 1, '用绝对路径做键应当无效 —— 这证明键必须规范化');
-  assert.deepEqual(emptyCatches('lib/temp.mjs', code, new Set([rightKey])), []);
+  const shifted = Array.from({ length: 50 }, (_, i) => `// f${i}`).join('\n') + '\n' + code;
+  const a = emptyCatches('lib/temp.mjs', code)[0].snippet;
+  const b = emptyCatches('lib/temp.mjs', shifted)[0].snippet;
+  assert.equal(b, a, '前插 50 行后锚点必须一模一样');
+  // 而行号确实变了 —— 证明上一条不是"因为文件没动"而碰巧相等
+  assert.equal(emptyCatches('lib/temp.mjs', shifted)[0].line,
+    emptyCatches('lib/temp.mjs', code)[0].line + 50);
 });
 
 // ─────────────────────────────────────────────────────────────

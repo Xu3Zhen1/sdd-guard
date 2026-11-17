@@ -239,7 +239,7 @@ node cli.mjs --help
 | `contractPrefixes` | string[] | `[]` | `DECOUPLE-1` 契约文件必须落在的前缀；空 = 不限制位置 |
 | `testNesting` | int \| null | `null` | `KISS-C1` 的**测试档**阈值。`null` = 与 `maxNesting` 相同（**默认不放宽**）；要放宽必须显式写数字 |
 | `testOverrides` | string[] | `[]` | `KISS-C1` 测试文件识别的用户覆盖：`"+前缀"` 强制算测试、`"-前缀"` 强制不算。**不支持正则**（只接受字面前缀） |
-| `catchAllowlist` | array | `[]` | `ARCH-07` 空 catch 豁免 `[{where, reason}]`；**两项都必填**，形如 `{"where":"lib/temp.mjs:95","reason":"清理失败不应掩盖主异常"}` |
+| `catchAllowlist` | array | `[]` | `ARCH-07` 空 catch 豁免 `[{where, snippet?, reason}]`；`where` 与 `reason` **必填**，`snippet` 可选。**豁免按内容锚定**（`snippet` = 从配对 `try` 到 `catch` 块的规范化文本），代码移动不会失效；`where` 的行号仅在**同文件同锚点**时用于消歧 |
 
 **测试档为什么默认不放宽**：默认值不是便利，是政策。若默认把测试档放宽到 6，
 等于静默偷走一次判定 —— 用户不知道阈值变了。分档能力存在，但不改变任何既有结论；
