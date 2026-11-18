@@ -231,11 +231,19 @@ function loadConfig(p) {
  *
  * 优先级 3 > 1 > 0：判据自己都不可信时，它报的 fail 也不该当作对被测对象的结论。
  *
- * @param {{summary:{untrusted:number}, coverageFail:boolean, hardFail:boolean}} p
+ * ★ 2026-11-18（外部实测 ④ · 用户裁定方案 A）：`machineTotal === 0` ⇒ 3。
+ *   "本次一条机器规则都没有"不是"全过"：8 条 manual 规则逐条实测，
+ *   `--only <manual id>` 原先全部 0/0 且退出码 0，CI 会把它读成放行。
+ *   判 3 而不是 1：本档没有任何机器判据说"你不合格"；也不是 2：调用本身合法。
+ *   ★ 只在 `=== 0` 时触发。`machineTotal > 0 且 covered === 0`（输入不足全 skip）
+ *   仍归 `--min-coverage` 管 —— 那是"边写边查"的合法初稿状态，不能一并判死。
+ *
+ * @param {{summary:{untrusted:number, machineTotal:number}, coverageFail:boolean, hardFail:boolean}} p
  * @returns {{signal:string, exitCode:number}}
  */
 export function decideExit({ summary, coverageFail, hardFail }) {
   if (summary.untrusted > 0) return { signal: SIGNAL.UNTRUSTED, exitCode: EXIT.INCOMPLETE };
+  if (summary.machineTotal === 0) return { signal: SIGNAL.INCOMPLETE, exitCode: EXIT.INCOMPLETE };
   if (coverageFail) return { signal: SIGNAL.INCOMPLETE, exitCode: EXIT.INCOMPLETE };
   if (hardFail) return { signal: SIGNAL.FAIL, exitCode: EXIT.FAIL };
   return { signal: 'ok', exitCode: EXIT.OK };
@@ -411,9 +419,9 @@ function main() {
 
   /**
    * 退出码分流（2026-11-13 · §5 Q4.5）。两种失败信号语义相反，必须可区分：
-   *   3 INCOMPLETE：判据自身不可信，或覆盖率不足 ⇒ 结论无效，必须阻断
+   *   3 INCOMPLETE：判据自身不可信 / 覆盖率不足 / **没有选中任何机器规则** ⇒ 结论无效
    *   1 FAIL      ：判据跑完了，明确判定不合格 ⇒ 阻断
-   *   0 OK        ：机器规则全过
+   *   0 OK        ：**至少跑过机器规则**且全过
    *
    * 3 优先于 1：判据自己都不可信时，它报的 fail 也不该当作对被测对象的结论。
    *
@@ -429,6 +437,14 @@ function main() {
   const { signal, exitCode } = decision;
 
   const warnings = collectArgWarnings(args);
+  // ★ 2026-11-18（外部实测 ④）：machineTotal=0 ⇒ 已在 decideExit 判 3。
+  //   这里补的是**可读的原因**与 JSON 里的 machine 可读痕迹（warnings 字段），
+  //   不靠退出码语义让调用方猜"为什么 3"。文字报告另有一行（runner.formatText）。
+  //   与 `coverageFail` 同形：原因走 stderr（两种输出模式都有），不留 doc 里查不到的隐式字段。
+  if (summary.machineTotal === 0) {
+    console.error('本次没有选中任何机器规则（machineTotal=0）：「全过」不成立，判为没跑完（退出码 3）。');
+    console.error('要拿机器结论，请去掉只含人工规则的 --only，或补回对应的机器规则 id。');
+  }
 
   /**
    * 代码树身份提示（**不参与退出码**）。
