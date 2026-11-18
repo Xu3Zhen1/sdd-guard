@@ -38,7 +38,7 @@
 | process | `KISS-D1` | machine | 新增第三方依赖必须逐个登记「标准库为什么不行」 |
 | process | `KISS-D2` | manual | 架构是否过度设计（模式、分层、抽象是否被任务真正需要） |
 | process | `DRY-D1` | machine | 复用清单必须是真实存在的路径，不能只写「已检索」 |
-| process | `DRY-T1` | machine | 任务引用的文件路径必须存在，或显式标注为新建 |
+| process | `DRY-T1` | machine | 任务引用的文件路径必须存在，或显式标注为新建（反引号路径不限后缀；裸路径须带源码后缀） |
 | process | `DRY-T2` | manual | 任务拆解是否需要先抽公共函数再继续 |
 | process | `DECOUPLE-1` | machine | 设计必须声明「接口契约真源」，且路径真实存在 |
 | process | `DECOUPLE-3` | manual | 契约是否覆盖了所有跨端通道（字段/错误码/分页/枚举/空值语义） |

@@ -350,6 +350,62 @@ test('DRY-T1 正控：同样路径标注「新建」后必须通过（避免过�
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// DRY-T1 裸路径（2026-11-18 · 外部实测 ③）
+//
+// ★ 缺陷：抽取键是反引号 —— `- [ ] alpha6/some.js`（裸路径）被判「未给出任何具体文件路径」。
+//   把"没写反引号"读成"没写路径"，这属于**静默跳过**（fail-closed 方向是安全的，
+//   但读者会以为作者没给路径，而实际给了）。
+//
+// ★ 为什么不能直接用全部 token：实测本仓库两个真实 tasks.md 里，
+//   裸 token 候选 8 个，**全部是误报** —— `12/12` `4/4` `6/6` `ACCEPT-E1/E3`
+//   `A04/A06/A13` `只计控制流/函数体块`。所以策略是**必须已知扩展名**：
+//   加了这个条件后，同一批文件里裸候选真阳性 0 / 误报 0（没有裸路径可测），
+//   而正控夹具（`alpha6/some.js`）能命中。
+// ─────────────────────────────────────────────────────────────
+
+test('★ DRY-T1 正控：裸路径（无反引号）也必须被抽取并校验存在性', () => {
+  const ws = makeWorkspace();
+  try {
+    const p = join(ws.changeDir, 'tasks.md');
+    writeFileSync(p, '# 任务\n\n- [ ] T1 改 src/export/nonexistent.js 里的校验\n');
+    const { byId } = run(ws);
+    assertFails(byId, 'DRY-T1', '不存在');
+    assert.ok(
+      (byId['DRY-T1'].items || []).some((s) => s.includes('src/export/nonexistent.js')),
+      '必须点名那条裸路径',
+    );
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('★ DRY-T1 正控：裸路径真实存在 ⇒ 通过（没有把裸路径一律判死）', () => {
+  const ws = makeWorkspace();
+  try {
+    const p = join(ws.changeDir, 'tasks.md');
+    writeFileSync(p, '# 任务\n\n- [ ] T1 改 src/export/handler.js 里的校验\n');
+    const { byId } = run(ws);
+    assertPasses(byId, 'DRY-T1');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('★ DRY-T1 反向：分数 / 规则 id / 无扩展名片段 不得被当成路径', () => {
+  const ws = makeWorkspace();
+  try {
+    const p = join(ws.changeDir, 'tasks.md');
+    writeFileSync(p, '# 任务\n\n- [ ] 覆盖 12/12，`ACCEPT-E1` 与 ACCEPT-E1/E3 都要看，A04/A06 同理\n- [ ] 改 src/export/handler.js\n');
+    const { byId } = run(ws);
+    const r = byId['DRY-T1'];
+    assertPasses(byId, 'DRY-T1');
+    assert.match(r.detail || '', /1 条/, `只该抽出 1 条真路径，实际: ${r.detail}`);
+  } finally {
+    ws.cleanup();
+  }
+});
+
 test('DRY-T1 负控：tasks 完全不给路径 → 必须失败（无法查重）', () => {
   const ws = makeWorkspace();
   try {
