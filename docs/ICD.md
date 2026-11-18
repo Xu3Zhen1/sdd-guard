@@ -177,6 +177,26 @@ node cli.mjs --help
   - `通过 N · 失败 N · 跳过 N · 待人判 N   (共 N 条)`
   - `机器实际执行 N/M 条机器规则`
 
+### 2.3 扫描收据 `codeFiles.report`（S2，2026-11-18 补 `blacklisted`）
+
+`--json` 的 `codeFiles.report` 是**扫描面的完整收据**，每个 `--code` 根都留一条。
+
+| 字段 | 形态 | 语义 |
+|---|---|---|
+| `roots` | array | 逐根 `{root, kind, files, errors}`；`kind` ∈ `dir` / `file` / `missing` / `other` / `unknown`。失败的根也必须有记录 |
+| `candidates` | integer | 按后缀命中的源码文件数（**gitignore 过滤前**） |
+| `scanned` | integer | 过滤后真正进入规则的数 |
+| `ignored` | integer | 被 gitignore 排除的数 |
+| `ignoredSample` | array | 被排除的样例路径 |
+| `ignoreReason` | string \| null | 过滤未生效时的原因（未给 repo / git 不可用 / 调用方关闭）；**null 只表示"过滤成功且无需排除"** |
+| `excluded` | array | 逐根错误汇总（与 `errors` 同源） |
+| `errors` | array | 扫描错误：根不可读、后缀不支持、目录无法统计 |
+| `blacklisted` | object | `{count, dirs}`：因跳过规则**未进入候选**的源码文件。`count` = Σ`dirs[].files`；每条 `{path, kind, reason, files, error}`，`reason` ∈ `builtin`（内置黑名单）/ `caller`（调用方 skip）/ `dot-dir`（一级点目录）；`error` 非空表示该目录数不清，`files` 是**下界而不是 0 的结论** |
+
+**不变量（可复算）**：`candidates + blacklisted.count` = 该扫描面上按后缀物理存在的源码文件数（gitignore 过滤前）。
+
+**为什么加 `blacklisted`**：2026-11-18 外部实测（`g:/AMup`，27,075 个 JS）中，`vendor` 被整目录跳过 —— 937 个文件既不在 `candidates` 也不在 `errors` 里，而 27075 − 937 = 26138 与规则自报的"实检"数字逐字相等。gitignore 的排除有 `reason` + `sample`，黑名单的排除什么都没有：**收据结构不对称**，等于把"没扫"伪装成"扫了没问题"。
+
 ---
 
 ## 3. 产物契约（输入侧四制品）

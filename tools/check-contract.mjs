@@ -15,7 +15,7 @@ import { writableTempRoot } from '../lib/temp.mjs';
 import { VERSION, STATUSES, EXIT_CODES, OPTIONS, CONFIG_DEFAULTS, CONFIG_SCHEMA, REPEATABLE_KEYS, PROFILE_NAMES, EVIDENCE_KEYS, rulesForProfile, SWITCHES, SWITCH_CLASS } from '../lib/contract.mjs';
 import { EXIT as RUNNER_EXIT } from '../lib/runner.mjs';
 import { REPEATABLE_KEYS as ARGS_REPEATABLE } from '../lib/args.mjs';
-import { stripComments } from '../lib/code.mjs';
+import { stripComments, scanCodeRoots } from '../lib/code.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ICD = join(ROOT, 'docs', 'ICD.md');
@@ -944,6 +944,79 @@ function tierCounts(rules) {
     mac: rules.filter((r) => r.decidability === 'machine').length,
     man: rules.filter((r) => r.decidability === 'manual').length,
   };
+}
+
+// ── 8. 扫描收据字段：ICD §2.3 ↔ scanCodeRoots 实际产物（2026-11-18，外部实测 ②）──
+checkScanReceipt();
+
+/**
+ * 核扫描收据字段：ICD §2.3 的字段表 ↔ `scanCodeRoots` 的实际产物。
+ *
+ * ★ 为什么必须有这条（2026-11-18 外部实测 ②）：
+ *   `vendor` 目录被黑名单静默跳过，937 个 JS 既不进 `candidates` 也不进 `errors`。
+ *   修法不是"补一个数字"，而是**让收据结构对称**：凡是没扫的，都必须留下"为什么、多少个"。
+ *
+ *   只改代码不核文档 ⇒ 下次有人删字段没人知道；
+ *   只核文档不真扫 ⇒ 字段可能是空壳（本项目抓过"初始化后从未赋值、恒为 0"的假字段）。
+ *   所以两层：① 文档字段集合与实现字段集合**双向相等**；② 真扫一个含 vendor 的夹具，
+ *   断言 count / candidates / 不变量都是**写死的规格值**（不引用被测变量，避免自证）。
+ */
+function checkScanReceipt() {
+  const docKeys = documentedReceiptKeys(icd);
+  if (!docKeys.length) { bad('ICD §2.3 未声明扫描收据字段表（读不到任何 \`field\` 行）'); return; }
+  const real = scanReceiptFixture();
+  if (real.error) { bad(`扫描收据夹具执行失败: ${real.error}`); return; }
+  const doc = docKeys.slice().sort().join(',');
+  const act = Object.keys(real.report).sort().join(',');
+  if (doc === act) ok(`扫描收据字段 ICD §2.3 与实际一致: [${act}]`);
+  else bad(`扫描收据字段漂移: ICD=[${doc}] 实际=[${act}]`);
+  checkReceiptValues(real);
+}
+
+/** 从 ICD §2.3 的表格里抽出字段名（只看该节，避免误读别处的表）。 */
+function documentedReceiptKeys(text) {
+  const start = text.indexOf('### 2.3 扫描收据');
+  if (start < 0) return [];
+  const next = text.indexOf('\n### ', start + 1);
+  const block = next < 0 ? text.slice(start) : text.slice(start, next);
+  return [...block.matchAll(/^\|\s*\`([A-Za-z]+)\`\s*\|/gm)].map((m) => m[1]);
+}
+
+/** 造一个"1 个正常文件 + 1 个 vendor 文件"的最小夹具，返回真实收据。 */
+function scanReceiptFixture() {
+  const tmp = mkdtempSync(join(writableTempRoot(), 'cc-receipt-'));
+  try {
+    mkdirSync(join(tmp, 'src'), { recursive: true });
+    writeFileSync(join(tmp, 'src', 'a.js'), 'export const a = 1;\n');
+    mkdirSync(join(tmp, 'vendor'), { recursive: true });
+    writeFileSync(join(tmp, 'vendor', 'b.js'), 'export const b = 1;\n');
+    return scanCodeRoots([tmp], { useIgnore: false });
+  } catch (e) {
+    return { error: e.message };
+  } finally {
+    try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+}
+
+/** 断言收据里的数字是规格值（夹具固定：1 个正常 + 1 个 vendor = 物理 2 个源码文件）。 */
+function checkReceiptValues({ files, report }) {
+  const bl = report.blacklisted;
+  if (!bl || typeof bl.count !== 'number') {
+    bad('扫描收据缺 blacklisted.count —— 黑名单跳过必须计数，否则又是无声消失');
+    return;
+  }
+  const sum = bl.dirs.reduce((n, d) => n + d.files, 0);
+  const first = bl.dirs[0] || {};
+  if (bl.count === 1 && sum === 1 && bl.dirs.length === 1 && first.reason === 'builtin') {
+    ok('扫描收据 blacklisted 有真值: vendor 计 1 个文件、归因 builtin');
+  } else {
+    bad(`扫描收据 blacklisted 不是规格值: count=${bl.count} Σ=${sum} dirs=${bl.dirs.length} reason=${first.reason}`);
+  }
+  if (files.length === 1 && report.candidates === 1 && report.candidates + bl.count === 2) {
+    ok('扫描收据不变量成立: candidates 1 + blacklisted 1 = 物理 2 个源码文件');
+  } else {
+    bad(`扫描收据不变量不成立: files=${files.length} candidates=${report.candidates} blacklisted=${bl.count}（规格 1 + 1 = 2）`);
+  }
 }
 
 const fails = findings.filter((f) => f.level === 'fail');

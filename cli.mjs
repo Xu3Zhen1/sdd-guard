@@ -477,6 +477,15 @@ function main() {
     console.log(`档位(profile): ${profile}${profile === 'all' ? '' : profile === 'process' ? '（开发流程）' : '（验收标准）'}`);
     console.log(formatText(results));
     for (const line of renderTreeNotice(treeNotice)) console.log(line);
+    // ★ 2026-11-18（外部实测 ②）：黑名单/点目录跳过原先**完全无声** —— g:/AMup 上有
+    //   937 个 JS 既不在 candidates 也不在 errors 里。现在只要跳过就报，且数字可复算：
+    //   candidates + count = 物理存在的源码文件数。
+    const bl = scan.report.blacklisted;
+    if (bl && bl.count > 0) {
+      const top = bl.dirs.slice().sort((a, b) => b.files - a.files).slice(0, 3)
+        .map((d) => `${d.path.split(/[\\/]/).pop()}=${d.files}`).join(' · ');
+      console.error(`  ⚠ 扫描收据：另有 ${bl.count} 个源码文件因跳过规则未进入候选（${top}${bl.dirs.length > 3 ? ' …' : ''}），不计入 scanned`);
+    }
     if (scanErrors.length) {
       console.error(`  ⚠ 扫描收据：${scan.report.roots.length} 个 --code 根，候选 ${scan.report.candidates} 个源码文件，实际扫描 ${ctx.codeFiles.length} 个`);
       for (const e of scanErrors) console.error(`     · ${e}`);

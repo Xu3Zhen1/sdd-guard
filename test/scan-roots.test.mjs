@@ -94,7 +94,7 @@ function findUnreadableRoot(parent) {
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writableTempRoot } from '../lib/temp.mjs';
 import { spawnSync } from 'node:child_process';
@@ -267,5 +267,95 @@ test('负控：把只含非源码的目录当根 ⇒ files=0 且有痕（判据�
     const { files, report } = scanCodeRoots([join(root, 'docs')]);
     assert.equal(files.length, 0);
     assert.ok(report.roots[0].errors.length > 0, '没有源码也要留痕，否则"0 个文件"又变成静默');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// 黑名单跳过必须进收据（2026-11-18，外部实测报告 ②）
+//
+// ★ 外部实测（g:/AMup，27,075 个 JS）：`vendor` 目录被 SKIP_DIRS 整目录跳过，
+//   937 个源码文件既没进 `candidates`，也没进 `excluded` 或 `errors` ——
+//   **收据里一个字都没有**。27075 − 937 = 26138，与规则自报的"实检"数字逐字相等。
+//
+//   同族缺陷的判别式：**"没扫描"与"扫描了没问题"症状同形**。
+//   gitignore 的排除有 reason + sample，黑名单的排除什么都没有 ⇒ 收据结构不对称。
+//
+// ★ 判据设计（三条，缺一条就会退化成"数字看着有、其实不可复算"）：
+//   ① `count` 必须等于**逐目录 files 之和**（互斥、不重计：嵌套在跳过目录里的
+//      再一个黑名单目录只算外层一次）；
+//   ② 每条必须有 `path` + `reason`（内置黑名单 / 点开头一级目录 / 调用方 skip 三者可区分）；
+//   ③ 不变量：`candidates + count` == 物理存在的源码文件数 —— 这是唯一能证明
+//      "没有别的静默出口"的算式。
+// ─────────────────────────────────────────────────────────────
+
+/** 造一棵含黑名单目录的树；返回物理源码文件总数（用于不变量复算）。 */
+function makeBlacklistedTree(root) {
+  makeTree(root); // src/a.js src/b.mjs src/notes.md
+  const put = (rel, body = 'export const x = 1;\n') => {
+    const p = join(root, rel);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, body);
+  };
+  put('vendor/v1.js');
+  put('vendor/nested/v2.js');
+  put('vendor/nested/v3.ts');
+  put('vendor/readme.md', '# 非源码，不该计数\n');
+  put('vendor/node_modules/dep.js'); // 嵌套黑名单：只算 vendor 一次，不得重计
+  put('node_modules/pkg/index.js');
+  put('.cache/tmp.js');
+  put('.github/workflows/ci.js');
+  put('vendored/x.js'); // 名字相近但不是黑名单项 ⇒ 必须照常扫描
+  return 10; // src 2 + vendor 4 + node_modules 1 + .cache 1 + .github 1 + vendored 1
+}
+
+test('黑名单跳过必须进收据：count + 逐目录 files 可复算（外部实测 ②）', () => {
+  withTemp((root) => {
+    const physical = makeBlacklistedTree(root);
+    const { files, report } = scanCodeRoots([root], { useIgnore: false });
+
+    assert.ok(report.blacklisted, '收据必须含 blacklisted —— 黑名单不能无声吞文件');
+    assert.equal(files.length, 3, '只有 src/a.js src/b.mjs vendored/x.js 该被扫描');
+    assert.equal(report.candidates, 3);
+
+    // ① count 必须等于逐目录之和（含嵌套目录不重计）
+    assert.equal(report.blacklisted.count, 7, 'vendor 4 + node_modules 1 + .cache 1 + .github 1');
+    const sum = report.blacklisted.dirs.reduce((n, d) => n + d.files, 0);
+    assert.equal(sum, report.blacklisted.count, 'count 与逐目录之和必须一致（否则读者无法复算）');
+
+    // ② 每条可定位、可归因
+    assert.equal(report.blacklisted.dirs.length, 4, '四个被跳过的目录各占一条');
+    const vendor = report.blacklisted.dirs.find((d) => d.path === join(root, 'vendor'));
+    assert.ok(vendor, 'vendor 必须被逐条列出，不能只给总数');
+    assert.equal(vendor.files, 4, '嵌套在 vendor 里的 node_modules 只算外层一次');
+    assert.equal(vendor.reason, 'builtin', '内置黑名单的 reason 要能与其他跳过类型区分');
+    const dot = report.blacklisted.dirs.find((d) => d.path === join(root, '.cache'));
+    assert.equal(dot.reason, 'dot-dir', '点开头一级目录是另一条规则，理由必须可区分');
+    for (const d of report.blacklisted.dirs) {
+      assert.ok(typeof d.reason === 'string' && d.reason.length > 0, `每条都要有非空 reason: ${JSON.stringify(d)}`);
+    }
+
+    // ③ 不变量：候选 + 黑名单 == 物理存在的源码文件数
+    assert.equal(report.candidates + report.blacklisted.count, physical,
+      '这个等式是"没有别的静默出口"的唯一证明');
+    assert.ok(files.some((f) => f.endsWith('vendored' + sep + 'x.js')), '名字相近的目录不得被误吞');
+  });
+});
+
+test('负控：没有被跳过的目录 ⇒ count=0 且 dirs 为空数组（字段不能是 undefined）', () => {
+  withTemp((root) => {
+    makeTree(root);
+    const { report } = scanCodeRoots([join(root, 'src')]);
+    assert.deepEqual(report.blacklisted, { count: 0, dirs: [] }, '没有跳过时也必须是"有真值"的空收据');
+  });
+});
+
+test('调用方 skip 与内置黑名单可区分（同一条收据里理由不同）', () => {
+  withTemp((root) => {
+    makeBlacklistedTree(root);
+    const { report } = scanCodeRoots([root], { useIgnore: false, skip: ['src'] });
+    const src = report.blacklisted.dirs.find((d) => d.path === join(root, 'src'));
+    assert.ok(src, '调用方 skip 掉目录同样不得静默');
+    assert.equal(src.reason, 'caller');
+    assert.equal(src.files, 2);
   });
 });
