@@ -117,6 +117,77 @@ node cli.mjs check \
 实测空目录会报「通过 1 · 失败 0 · 跳过 16」而退出码 0，等于放行空提交。
 覆盖率不足说明的是**没检查**，不是**检查了没问题**。
 
+## 接入到其他项目
+
+上面的例子假设你**站在本仓库里**。其他项目要用它，有三条路（**都实测过**，不是设想）。
+
+### 路线 A：直接调绝对路径（零安装）
+
+```bash
+node /path/to/sdd-guard/cli.mjs check \
+  --change changes/add-empty-check \
+  --repo . \
+  --code src
+```
+
+- 本工具**零依赖**（`dependencies: {}`），不需要 `npm install`。
+- `--repo` 必须指**目标项目自己**：`--code` 的相对路径以它为准（2026-11-18 修）。
+- 适合 CI 里 `checkout` 两个仓库、或用 submodule 的场景。
+
+### 路线 B：作为本地依赖安装（推荐长期用）
+
+```bash
+# 在目标项目里
+npm install --save-dev file:/path/to/sdd-guard
+npx sdd-guard check --change changes/xxx --repo . --code src
+```
+
+或者 `npm link /path/to/sdd-guard`。
+
+> **Windows 注意**：`file:` 依赖建的是 **Junction（联接）**。
+> 2026-11-18 之前，经联接路径调用会**零输出、零报错、退出码 0**——
+> 因为 `isMain` 判定用了不解析符号链接的 `resolve()`，`main()` 从未执行。
+> 该缺陷已修（改走 `realpathSync`），回归见 `test/dist-entry.test.mjs`。
+> 本次修复之前装的副本请重装。
+
+### 路线 C：整个目录拷进目标项目
+
+零依赖，所以可以直接把本目录拷到目标项目的 `tools/sdd-guard/`，
+然后 `node tools/sdd-guard/cli.mjs …`。适合不允许外部依赖的仓库。
+
+### 调用契约（实测）
+
+| 参数 | 是否必填 | 说明 |
+| :-- | :-- | :-- |
+| `--change <dir>` | **必填**（缺则退出码 2） | 至少要有一个 `tasks.md`；目录不存在也会报错 |
+| `--repo <dir>` | 强烈建议 | 决定 `--code` 相对解析，也决定 `git check-ignore` 过滤的基准 |
+| `--code <path>` | 按需，可重复 | **相对 `--repo` 解析**；绝对路径原样使用 |
+| `--config <file>` | 可选 | 省略则用内置默认值（`maxNesting: 3` 等） |
+| `--diff <json>` | 可选 | 不给则 `DISCIPLINE-C1/C3` 报 SKIP |
+| `--evidence <file>` | `--profile acceptance` 时**必填** | 验收档只能读它没参与生产的证据 |
+
+**档位**：`process`（11 条制品判据）· `acceptance`（16 条，要 `--evidence`）· 默认 `all`（27 条）。
+
+**还没有「只跑代码规则」的档位。** 想只查 `KISS-C1` / `DRY-C1` / `ARCH-*`，
+目前只能用默认 `all`，然后忽略 process 那 11 条（它们会 SKIP 或 MANUAL）。
+这是已知限制，不是用法问题。
+
+### 实测样本
+
+拿本工作区的 `dsh-session-compat`（76 个 JS 文件）跑：
+
+```
+node cli.mjs check --change <临时目录> --repo <该仓库> --code .
+→ exit 1
+→ ARCH-06：1 处恒真循环缺少 break/return/throw（实检 76 个文件）
+→ ARCH-07：9 处 catch 块体为空（未登记豁免）
+```
+
+### 制品模板
+
+`process` 档要的四个制品，模板在 `templates/`；
+`AGENTS.md.template` 是给目标项目的全局原则落地文件（区分 `[机器判据]` 与 `[人工]`）。
+
 ## 规则清单
 
 ### 提案阶段（proposal.md）
