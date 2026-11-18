@@ -17,6 +17,20 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { aggregateByFile } from '../lib/rules.mjs';
 
+/**
+ * 取**样本部分**（去掉末尾的截断自曝行）。
+ *
+ * ★ 2026-11-18 为什么需要它：
+ *   `aggregateByFile` 现在会在**超出名额时**追加一条自曝
+ *   「…… 另有 N 处未列出（本项共 M 处，此处仅示 K 处）」。
+ *   本文件测的是**名额分配策略**（谁获得名额），不是报告形态，
+ *   所以断言必须只看样本 —— 否则每加一条自曝就要改四处无关的断言，
+ *   那种改法是"让测试迁就实现"，会掩盖真实回归。
+ *
+ *   截断自曝本身的判据在 `test/items-truncation.test.mjs` 单独测。
+ */
+const sampleOf = (items) => (items.some((t) => /^…… 另有 /.test(t)) ? items.slice(0, -1) : items);
+
 /** 造 N 条属于同一文件的条目。 */
 function ofFile(file, n, tag = '') {
   return Array.from({ length: n }, (_, i) => ({ file, text: `${file}:${i + 1} ${tag}` }));
@@ -33,10 +47,13 @@ test('★ 单文件占满名额的情形 ⇒ 其他文件必须仍然出现', ()
     ...Array.from({ length: 14 }, (_, i) => ({ file: `F${i}.java`, text: `F${i}.java:1 x` })),
   ];
   const items = aggregateByFile(entries, 30);
-  assert.equal(items.length, 30, `总条数应保持上限 30，实际 ${items.length}`);
+  const sample = sampleOf(items);
+  assert.equal(sample.length, 30, `样本应保持上限 30，实际 ${sample.length}`);
 
-  const files = new Set(items.map((t) => t.split(':')[0]));
+  const files = new Set(sample.map((t) => t.split(':')[0]));
   assert.equal(files.size, 15, `15 个文件都必须出现，实际 ${files.size} 个: ${[...files].join(',')}`);
+  // 43 条 > 30 ⇒ 必须有截断自曝
+  assert.match(items[items.length - 1], /另有 13 处未列出/, '超限必须自曝截断条数');
 });
 
 test('文件数少于名额时，剩余名额按"文件内条数"降序分配给热点', () => {
@@ -46,9 +63,10 @@ test('文件数少于名额时，剩余名额按"文件内条数"降序分配给
     ...ofFile('mid.js', 5),
   ];
   const items = aggregateByFile(entries, 10);
-  assert.equal(items.length, 10, '应取满 10 条');
+  const sample = sampleOf(items);
+  assert.equal(sample.length, 10, '应取满 10 条');
   const cnt = {};
-  for (const t of items) {
+  for (const t of sample) {
     const f = t.split(':')[0];
     cnt[f] = (cnt[f] || 0) + 1;
   }
@@ -77,9 +95,12 @@ test('★ 负控：文件数 > 名额时，仍保证前 limit 个文件各 1 条
   const entries = [];
   for (let i = 0; i < 40; i++) entries.push({ file: `f${String(i).padStart(2, '0')}.js`, text: `f${i}.js:1` });
   const items = aggregateByFile(entries, 30);
-  assert.equal(items.length, 30, '应正好 30 条');
-  const files = new Set(items.map((t) => t.split(':')[0]));
+  const sample = sampleOf(items);
+  assert.equal(sample.length, 30, '样本应正好 30 条');
+  const files = new Set(sample.map((t) => t.split(':')[0]));
   assert.equal(files.size, 30, `30 个名额应覆盖 30 个不同文件，实际 ${files.size}`);
+  // 40 条 > 30 ⇒ 必须有截断自曝
+  assert.match(items[items.length - 1], /另有 10 处未列出/);
 });
 
 test('★ 负控：同一文件内的条目保持原有顺序（不重排，避免改变"第一条"语义）', () => {
@@ -107,15 +128,18 @@ test('★ 负控：结果稳定 —— 同样的输入跑两次得到完全相�
 // 3. 元判据
 // ─────────────────────────────────────────────────────────────
 
-test('元判据：返回条数恒 ≤ limit，且每条文本都来自输入', () => {
+test('元判据：样本条数恒 ≤ limit，且每条文本都来自输入', () => {
   const entries = [...ofFile('a.js', 100), ...ofFile('b.js', 50)];
   const limit = 30;
   const items = aggregateByFile(entries, limit);
-  assert.ok(items.length <= limit, `条数不得超上限，实际 ${items.length}`);
+  const sample = sampleOf(items);
+  assert.ok(sample.length <= limit, `样本条数不得超上限，实际 ${sample.length}`);
+  // 多出来的那条只能是截断自曝，不能是违规条目
+  assert.ok(items.length <= limit + 1, `最多 limit + 1 条（含自曝），实际 ${items.length}`);
 
   const inputTexts = new Set(entries.map((e) => e.text));
-  for (const t of items) {
-    assert.ok(inputTexts.has(t), `输出条目必须来自输入，出现来源不明: ${t}`);
+  for (const t of sample) {
+    assert.ok(inputTexts.has(t), `样本条目必须来自输入，出现来源不明: ${t}`);
   }
 });
 
