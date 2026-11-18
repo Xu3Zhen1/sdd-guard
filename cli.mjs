@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // sdd-guard —— 把 YAGNI/KISS/DRY 里可机械判定的部分变成会 FAIL 的检查。
 // 退出码: 0=全过, 1=判据判定不合格, 2=输入/配置错误, 3=判据不可信或没跑完
-import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve, extname, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runRules, formatText, summarize, selectRules, EXIT, SIGNAL } from './lib/runner.mjs';
@@ -499,6 +499,32 @@ function main() {
  * 为什么需要这道闸：`decideExit` 是退出码分流的核心，测试必须能**直接调用真实现**。
  * 若 import 即执行 main()，测试就只能去匹配源码文本形状 ——
  * 那是"用字符串相似度代替行为验证"，改一版实现就会假红（q4-5 实测踩过 5 次）。
+ *
+ * ★★ 2026-11-18 修：**必须比 `realpath`，不能比 `resolve`**。
+ *
+ * 实测缺陷（回答"其他项目怎么调用"时撞到的）：
+ *   `npm install file:<本仓库>` 在 Windows 上建的是 **Junction**。于是
+ *     process.argv[1]  —— 联接路径（`<消费方>/node_modules/sdd-guard/cli.mjs`）
+ *     import.meta.url  —— 本仓库的真实路径
+ *   而 `resolve()` **不解析符号链接** ⇒ 两者永不相等 ⇒ `isMain=false`
+ *   ⇒ `main()` 根本没执行 ⇒ **CLI 静默什么都不做，并且以 0 退出**。
+ *
+ *   这是最坏的失败形态：既没有输出、也没有报错，退出码还表示成功。
+ *   使用者会以为"检查通过了"，而实际上是"检查没跑"。
+ *
+ * 修法：两侧都走 `realpathSync`（拿真实路径）；拿不到（文件已删等）则回退到 resolve。
  */
-const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+function sameFile(a, b) {
+  const norm = (p) => {
+    const r = resolve(p);
+    try {
+      return realpathSync(r);
+    } catch {
+      return r; // 文件不可解析时退回字面路径，至少不比之前差
+    }
+  };
+  return norm(a) === norm(b);
+}
+
+const isMain = Boolean(process.argv[1]) && sameFile(process.argv[1], fileURLToPath(import.meta.url));
 if (isMain) main();
