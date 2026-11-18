@@ -115,6 +115,14 @@ test('★ 仅分号 `{ ; }` ⇒ 也必须报出（空语句不处理任何东西
   assert.match(r.text, /异常被完全吞掉|仅有空语句/, `分号形态要有说法，实际: ${r.text}`);
 });
 
+test('★ 行尾注释也必须算"有注释"（掩码差分，不靠正则猜）', () => {
+  // ★ 注意换行：`catch { ; // 说明 }` 会把闭合花括号吞进注释里，那**不是合法的空 catch**，
+  //   是另一个形状。要测"行尾注释"必须让 `}` 落在下一行。
+  const r = catchShapeOf('; // 行尾说明\n');
+  assert.equal(r.status, 'fail', '行尾注释同样是注释，块体仍是无语句');
+  assert.match(r.text, /仅有注释/, `行尾注释被漏判了，实际: ${r.text}`);
+});
+
 test('反向：真语句 / 字符串语句 ⇒ 仍不得报出（判断没被做宽）', () => {
   assert.equal(catchShapeOf('b();').status, 'pass', '有语句就是处理过（本判据不管好坏）');
   assert.equal(catchShapeOf('"handled"').status, 'pass', '字符串是表达式语句，不是空');

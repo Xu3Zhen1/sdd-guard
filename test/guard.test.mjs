@@ -406,6 +406,54 @@ test('★ DRY-T1 反向：分数 / 规则 id / 无扩展名片段 不得被当�
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// 跨规则影响：裸路径通道**必须只属于 DRY-T1**（2026-11-19 复核实测）
+//
+// ★ 我第一版把裸通道写进了共用的 extractPaths，当时的推理是
+//   「只增加候选 ⇒ 只会更严」。**这个推理是错的**，因为候选进入的判定路径不都一样：
+//     · DRY-D1 / DECOUPLE-1：`paths.length < n` / `!paths.length` 是 **FAIL**
+//       ⇒ 候选从 0 变 1 是 **FAIL 洗成 PASS**；
+//     · DISCIPLINE-C3：抽到的路径进 `acc.declared`（“文档声明过”）
+//       ⇒ 候选变多 = 更容易满足 = **放松**；
+//     · 只有 DRY-T1 是“每条都要 existsProjectFile”，候选越多才越严。
+//
+//   ⇒ 权限收回：`extractPaths(text, { bare: true })`，只有 DRY-T1 传 true。
+//   下面三条是**反向断言**：它们必须在默认（不传 bare）时仍然 FAIL。
+// ─────────────────────────────────────────────────────────────
+
+test('★ 跨规则反向：复用清单只有叙述性裸路径 ⇒ DRY-D1 仍必须 FAIL（不得被洗成 PASS）', () => {
+  const ws = makeWorkspace();
+  try {
+    writeFileSync(join(ws.changeDir, 'design.md'),
+      '# 设计\n\n## 复用清单\n\n- 先看看 src/export/handler.js 是怎么写的，参考它的做法。\n\n## 新增依赖\n\n无。\n');
+    const { byId } = run(ws);
+    assertFails(byId, 'DRY-D1', '复用清单仅 0 条路径');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('★ 跨规则反向：接口契约只有叙述性裸路径 ⇒ DECOUPLE-1 仍必须 FAIL', () => {
+  const ws = makeWorkspace();
+  try {
+    writeFileSync(join(ws.changeDir, 'design.md'),
+      '# 设计\n\n## 接口契约\n\n- 参考 src/export/handler.js 的写法就行，本次不动它。\n');
+    const { byId } = run(ws);
+    assertFails(byId, 'DECOUPLE-1', '没有给出任何具体文件路径');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('元判据：extractPaths 的裸通道必须默认关闭（`bare` 选项存在且缺省为假）', () => {
+  const src = readFileSync(new URL('../lib/rules.mjs', import.meta.url), 'utf8');
+  assert.match(src, /export function extractPaths\(text, \{ bare = false \} = \{\}\)/,
+    'extractPaths 的裸通道必须默认关闭 —— 共用原语上的放宽会同时改变三条规则的语义');
+  const calls = [...src.matchAll(/extractPaths\(([^)]*)\)/g)].map((m) => m[1]);
+  const withBare = calls.filter((c) => c.includes('bare: true'));
+  assert.equal(withBare.length, 1, `只允许一处显式开启裸通道（DRY-T1），实际 ${withBare.length} 处: ${JSON.stringify(calls)}`);
+});
+
 test('DRY-T1 负控：tasks 完全不给路径 → 必须失败（无法查重）', () => {
   const ws = makeWorkspace();
   try {
