@@ -56,7 +56,7 @@
 | acceptance | `KISS-C2` | manual | 现有依赖是否可替代本次新增的抽象 |
 | acceptance | `ARCH-06` | machine | 循环必须有可终止的退出路径（恒真条件必须有**作用于本循环**的 break/return/throw） |
 | acceptance | `ARCH-06-M` | manual | 事件监听器是否包含防重入锁 |
-| acceptance | `ARCH-07` | machine | `catch` 块不得**体完全为空**（真空吞异常） |
+| acceptance | `ARCH-07` | machine | `catch` 块不得**没有语句**（真空 / 仅注释 / 仅分号；注释不处理异常） |
 | acceptance | `ARCH-07-M` | manual | 基础系统异常是否被静默吞掉；业务拦截器是否修改系统核心状态 |
 
 ### 三条明确的能力边界（不当作通过）

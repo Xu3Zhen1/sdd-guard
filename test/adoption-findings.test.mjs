@@ -100,6 +100,8 @@ test('★★ 命脉：ARCH-07 的 fail 文案必须写出「实检 N 个文件�
   // 而改动的实质是**文案对称性** —— 直接查源码里那条 reason 模板最直接、最不脆。
   const src = readFileSync(new URL('../lib/rules.mjs', import.meta.url), 'utf8');
   const m = src.match(/reason: `\$\{bad\.length\} 处 catch 块体为空[^`]*`/);
+  // ★ 2026-11-18：措辞已按「有无注释」分档（见 lib/rules.mjs 的 describeEmptyCatch），
+  //   但 fail 的 reason 模板仍是这一句 —— 分母断言不变。
   assert.ok(m, '找不到 ARCH-07 的 fail reason 模板（源码形态已变，需同步本条判据）');
   assert.match(m[0], /实检 \$\{stats\.scanned\.length\} 个文件/,
     `fail 文案必须带分母，实际: ${m[0]}`);

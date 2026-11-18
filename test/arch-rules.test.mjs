@@ -59,6 +59,68 @@ function makeCtx(repo, files, cfg = {}) {
 const RULE = (id) => RULES.find((r) => r.id === id);
 
 // ─────────────────────────────────────────────────────────────
+// 「空」的定义必须统一（2026-11-18 · 外部实测 ⑤）
+//
+// ★ 实测的四种形态（都在真实仓库里出现过，见 _diag/arch07-realstats.mjs）：
+//   `catch {}`                     —— 真空
+//   `catch { /* ignore */ }`       —— 仅注释
+//   `catch {\n // ignore\n}`      —— 仅行注释
+//   `catch { ; }`                  —— 空语句（分号）
+//
+// ★ 判定口径（用户裁定）：
+//   前三种**都算体为空**（注释不消费异常 = 运行时行为与 `catch {}` 完全一样），
+//   但**报告要区分有无注释** —— 现状一律写"异常被完全吞掉"，会让人以为连说明都没有。
+//   第四种 `{ ; }` **也算体为空**：`;` 是空语句，不处理任何东西；
+//   原先它被判"非空"，与"空"的定义不一致 —— 同一次改动里一起钉死。
+//
+// ★ 为什么不能放宽成"有注释就算处理"：那会打开一条**不需要登记、不需要 reason、
+//   还能绕过 catchAllowlist 审计**的豁免通道 —— 写一行 `// ignore` 就过。
+// ─────────────────────────────────────────────────────────────
+
+/** 断言四种形态的判定与措辞：`reported` 与是否提到注释，都必须按规格。 */
+function catchShapeOf(body) {
+  const r = makeRepo();
+  try {
+    r.write('e.js', `try { x(); } catch { ${body} }\n`);
+    const res = RULE('ARCH-07').run(makeCtx(r.repo, ['e.js']));
+    return { status: res.status, text: (res.items || []).join(' | ') || res.reason || '' };
+  } finally {
+    r.cleanup();
+  }
+}
+
+test('★ 真空 catch ⇒ 报出，措辞不提注释', () => {
+  const r = catchShapeOf('');
+  assert.equal(r.status, 'fail');
+  assert.match(r.text, /异常被完全吞掉/);
+  assert.doesNotMatch(r.text, /注释/, '没有注释时不得提注释');
+});
+
+test('★ 仅块注释 ⇒ 仍报出，且措辞必须点明"仅有注释"', () => {
+  const r = catchShapeOf('/* ignore */');
+  assert.equal(r.status, 'fail', '注释不处理异常，不能因为写了注释就通过');
+  assert.match(r.text, /仅有注释/, `必须点明是仅注释形态，实际: ${r.text}`);
+  assert.match(r.text, /注释不处理异常/, '必须解释为什么注释不算处理');
+});
+
+test('★ 仅行注释 ⇒ 仍报出，且措辞必须点明"仅有注释"', () => {
+  const r = catchShapeOf('\n  // ignore\n');
+  assert.equal(r.status, 'fail');
+  assert.match(r.text, /仅有注释/);
+});
+
+test('★ 仅分号 `{ ; }` ⇒ 也必须报出（空语句不处理任何东西）', () => {
+  const r = catchShapeOf(';');
+  assert.equal(r.status, 'fail', '空语句不是"处理"，与真空同义');
+  assert.match(r.text, /异常被完全吞掉|仅有空语句/, `分号形态要有说法，实际: ${r.text}`);
+});
+
+test('反向：真语句 / 字符串语句 ⇒ 仍不得报出（判断没被做宽）', () => {
+  assert.equal(catchShapeOf('b();').status, 'pass', '有语句就是处理过（本判据不管好坏）');
+  assert.equal(catchShapeOf('"handled"').status, 'pass', '字符串是表达式语句，不是空');
+});
+
+// ─────────────────────────────────────────────────────────────
 // 缺陷 1：退出语句的作用域
 // ─────────────────────────────────────────────────────────────
 
