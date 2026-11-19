@@ -407,6 +407,49 @@ test('★ DRY-T1 反向：分数 / 规则 id / 无扩展名片段 不得被当�
 });
 
 // ─────────────────────────────────────────────────────────────
+// ★ 外部仓反例集（2026-11-20）：裸路径通道的**噪声形状**，取自真实外部仓。
+//
+// 唯一的本仓证据曾经是两份 `tasks.md`（裸候选 0 条）——那证明不了外部仓不误报。
+// 下面两条样本全部来自 `G:\AMup` 的真实文档（非构造），每条注明出处：
+//   · 噪声类：glob 通配 / 正则片段 —— 在文件系统里**不可能是文件**，
+//     但「含分隔符 + 源码扩展名」两条门槛会把它们全收进来，
+//     再被 DRY-T1 判成「不存在且未标注新建」⇒ **假红**。
+//   · 真路径类：叙述性句子里的裸路径，必须照旧命中。
+//
+// 实测规模（12,757 份真实 .md，裸通道新增 22,360 条候选）：
+//   含 `* ? { }` 的 **1,019 条**全是噪声；剔除后零误伤（21,341 条真候选一条不少）。
+// ─────────────────────────────────────────────────────────────
+
+test('★ 外部反例集①：glob 通配不得被当成路径（真实样本）', () => {
+  // 出处：G:\AMup\_diag\sdd-guard-adoption-20261118.md（specs/*.md）
+  //       G:\AMup\alpha6run\bprime-merged-report.md（tests/smoke/*.mjs）
+  //       G:\AMup\alpha6run\dollar1-confirmed.md（G:\AMup\alpha6run\*.mjs）
+  for (const noise of ['specs/*.md', 'tests/smoke/*.mjs', 'G:\\AMup\\alpha6run\\*.mjs', 'src/**/*.js', 'backup/*-pre-v4/']) {
+    const got = extractPaths(`见 ${noise} 里的全部`, { bare: true });
+    assert.deepEqual(got, [], `glob 被当成路径了: ${noise} ⇒ ${JSON.stringify(got)}`);
+  }
+});
+
+test('★ 外部反例集②：正则 / JSON 片段不得被当成路径（真实样本）', () => {
+  // 出处：G:\AMup\alpha6run\F1-F4-ARCH-RCA.md（requiresApproval\s*[:=]）
+  const noise = 'requiresApproval\\s*[:=]';
+  assert.deepEqual(extractPaths(`匹配 ${noise} 即可`, { bare: true }), [], '正则片段被当成路径了');
+});
+
+test('★ 外部正例：叙述句里的裸路径必须照旧命中（真实样本）', () => {
+  // 出处：G:\AMup\upstream-v4\openspec\changes\three-light-skins\tasks.md
+  //   原文：`Final evidence: docs/skin-figures/iter5-final/README.md.`
+  //   ⇒ 改前（2c1064b 之前）该 tasks.md **抽出 0 条路径**，被 DRY-T1 判「未给出任何具体文件路径」；
+  //     改后抽出 1 条且文件真实存在 ⇒ PASS。这是一条真实外部仓的假红→正确绿。
+  const got = extractPaths('Final evidence: docs/skin-figures/iter5-final/README.md.', { bare: true });
+  assert.deepEqual(got, ['docs/skin-figures/iter5-final/README.md'], `尾部句号必须剥掉后仍命中，实际: ${JSON.stringify(got)}`);
+});
+
+test('★ 边界：方括号路径必须保留（Next.js 的 app/[...slug]/page.tsx 是真路径）', () => {
+  const got = extractPaths('改 app/[...slug]/page.tsx 的渲染', { bare: true });
+  assert.deepEqual(got, ['app/[...slug]/page.tsx'], '方括号路径被误伤（我们只拒 * ? { }，不拒 [ ]）');
+});
+// ─────────────────────────────────────────────────────────────
 // 跨规则影响：裸路径通道**必须只属于 DRY-T1**（2026-11-19 复核实测）
 //
 // ★ 我第一版把裸通道写进了共用的 extractPaths，当时的推理是
