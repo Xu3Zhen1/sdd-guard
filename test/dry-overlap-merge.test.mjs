@@ -63,6 +63,34 @@ test('★ 大规模重复：40 份相同文件 × 20 个，段数有限且 span 
   }
 });
 
+test('★ 流式消费：onRun 必须逐条交付，且不与数组模式不一致', () => {
+  const body = Array.from({ length: 40 }, (_, i) => 'const s' + i + ' = pick(' + i + ');').join('\n') + '\n';
+  const files = {};
+  for (let c = 0; c < 6; c++) files['g' + c + '.js'] = body;
+  const ws = makeRepo(files);
+  try {
+    const arr = duplicateBlocks(ws.paths, 6, { minChars: 40 });
+    const seen = [];
+    const n = duplicateBlocks(ws.paths, 6, { minChars: 40, onRun: (d) => seen.push(d) });
+    assert.equal(n, seen.length, 'finish() 返回的条数必须等于实际交付条数');
+    assert.equal(n, arr.length, '流式与数组模式条数必须一致');
+    const canon = (x) => JSON.stringify(x.map((d) => ({ a: d.a, b: d.b, span: d.span, windows: d.windows, size: d.size })));
+    assert.equal(canon(seen.sort((x, y) => x.a.file.localeCompare(y.a.file) || x.a.line - y.a.line)),
+      canon(arr.sort((x, y) => x.a.file.localeCompare(y.a.file) || x.a.line - y.a.line)),
+      '流式交付的内容必须与数组模式逐条一致');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('元判据：DRY-C1 必须以 onRun 流式消费（不得先取全量数组再 map）', () => {
+  const src = readFileSync(new URL('../lib/rules.mjs', import.meta.url), 'utf8');
+  const seg = src.slice(src.indexOf("id: 'DRY-C1'"), src.indexOf("id: 'YAGNI-C1'"));
+  assert.ok(seg, '找不到 DRY-C1 源码段');
+  assert.match(seg, /onRun\(/, 'DRY-C1 必须用 onRun 流式消费（164 万段全量物化 = 1 GB）');
+  assert.doesNotMatch(seg, /const dups = duplicateBlocks/, '不得先取全量数组');
+});
+
 /** 造一个临时仓，写入若干文件，返回文件绝对路径列表。 */
 function makeRepo(files) {
   const dir = mkdtempSync(join(writableTempRoot(), 'dry-merge-'));
