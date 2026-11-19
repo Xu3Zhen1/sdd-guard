@@ -19,7 +19,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { writableTempRoot } from '../lib/temp.mjs';
-import { duplicateBlocks } from '../lib/code.mjs';
+import { duplicateBlocks, compareRuns } from '../lib/code.mjs';
+import { compareSample } from '../lib/rules.mjs';
 
 // ─────────────────────────────────────────────────────────────
 // 内存模型（2026-11-19 第一刀）
@@ -89,6 +90,54 @@ test('元判据：DRY-C1 必须以 onRun 流式消费（不得先取全量数组
   assert.ok(seg, '找不到 DRY-C1 源码段');
   assert.match(seg, /onRun\(/, 'DRY-C1 必须用 onRun 流式消费（164 万段全量物化 = 1 GB）');
   assert.doesNotMatch(seg, /const dups = duplicateBlocks/, '不得先取全量数组');
+});
+
+test('★ 数组模式必须按 compareRuns 有序（消费方靠它取"代表条"）', () => {
+  const body = (p, base) => Array.from({ length: 8 }, (_, i) => p + '_' + i + ' = ' + (base + i) + ';').join('\n');
+  const files = {};
+  for (let i = 0; i < 5; i++) files['f' + i + '.js'] = body('v' + i, 100 * (i + 1));
+  // 再造跨文件重复：每个文件都含一段相同内容
+  const shared = body('shared', 700);
+  for (let i = 0; i < 5; i++) files['f' + i + '.js'] += '\n' + shared + '\n';
+  const ws = makeRepo(files);
+  try {
+    const dups = duplicateBlocks(ws.paths, 6, { minChars: 40 });
+    assert.ok(dups.length > 1, '必须有跨文件重复可排');
+    const sorted = dups.slice().sort(compareRuns);
+    assert.deepEqual(dups.map((d) => d.a.file + ':' + d.a.line), sorted.map((d) => d.a.file + ':' + d.a.line),
+      '数组模式必须已按 compareRuns 排好序（消费方据此确定每文件的代表条）');
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('元判据：DRY-C1 的代表条必须经 compareRuns 有序小缓冲（不许先到先得）', () => {
+  const src = readFileSync(new URL('../lib/rules.mjs', import.meta.url), 'utf8');
+  const seg = src.slice(src.indexOf("id: 'DRY-C1'"), src.indexOf("id: 'YAGNI-C1'"));
+  assert.ok(seg, '找不到 DRY-C1 源码段');
+  assert.match(seg, /insertRunSample\(/, '必须用有序小缓冲维护每文件代表条');
+  assert.doesNotMatch(seg, /\btexts\.push\(/, '不得按到达顺序直接 push —— 那会改变报告里的代表条（实测 4/31 条不同）');
+  const helper = src.slice(src.indexOf('function insertRunSample'), src.indexOf('function insertRunSample') + 2000);
+  assert.match(helper, /compareSample\(/, '有序小缓冲必须用与 compareRuns 等价的比较器排序');
+  assert.match(helper, /pairKeyOf\(/, '排序键要预先算好（每次比较都拼 pairKey 实测拖慢近一倍）');
+});
+
+test('★ 对拍：compareSample（消费方排序）与 compareRuns（引擎排序）逐对一致', () => {
+  const rel = (n) => n + '.js';
+  const runs = [];
+  for (let i = 0; i < 12; i++) {
+    for (let j = 0; j < 3; j++) {
+      runs.push({ a: { file: rel('f' + (i % 5)), line: i + 1 }, b: { file: rel('g' + (j + 1)), line: i + j + 2 } });
+    }
+  }
+  const byEngine = runs.slice().sort(compareRuns).map((r) => r.a.file + ':' + r.a.line + '>' + r.b.file + ':' + r.b.line);
+  const bySample = runs.map((r) => ({
+    pair: r.a.file <= r.b.file ? r.a.file + '\u0000' + r.b.file : r.b.file + '\u0000' + r.a.file,
+    line: r.a.line,
+    bLine: r.b.line,
+    key: r.a.file + ':' + r.a.line + '>' + r.b.file + ':' + r.b.line,
+  })).sort(compareSample).map((x) => x.key);
+  assert.deepEqual(bySample, byEngine, '两个比较器对同一批 run 的排序必须逐条相同');
 });
 
 /** 造一个临时仓，写入若干文件，返回文件绝对路径列表。 */
