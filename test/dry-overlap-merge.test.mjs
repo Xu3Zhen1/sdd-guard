@@ -16,10 +16,52 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { writableTempRoot } from '../lib/temp.mjs';
 import { duplicateBlocks } from '../lib/code.mjs';
+
+// ─────────────────────────────────────────────────────────────
+// 内存模型（2026-11-19 第一刀）
+//
+// ★ 缺陷形状（本机实测，`G:/AMup` `--only DRY-C1`）：
+//   默认堆 4288 MB → 28.6 s exit 134、输出 0 字节；8 GB → 仍崩；12 GB → 仍崩。
+//   不是"堆小了"，是**每条命中都被物化进一个数组**：
+//   该语料 1,566 万个滑动窗口、跨文件命中 **1,292 万条**，
+//   `found.push(...)` 把它们全留下再排序分组 —— 1292 万个对象的峰值就是 9 GB 量级。
+//
+// ★ 修法（判定语义一行没动）：分组键 (文件对, a.file, 行差) 已蕴含 b 侧文件，
+//   而文件顺序扫、窗口行递增 ⇒ 同组命中天然按 a.line 递增到达，
+//   于是"先收齐再排序分组"是多余的 —— 边扫边合并、每文件结束收尾即可。
+//   另：索引只留 {line,file}（key 就是 Map 的键），sample 只在命中时拼。
+// ─────────────────────────────────────────────────────────────
+
+test('元判据：duplicateBlocks 不得物化全部命中（必须流式合并）', () => {
+  const src = readFileSync(new URL('../lib/code.mjs', import.meta.url), 'utf8');
+  const fn = src.slice(src.indexOf('export function duplicateBlocks'), src.indexOf('function createRunMerger'));
+  assert.ok(fn, '找不到 duplicateBlocks（源码形态已变，需同步本条判据）');
+  assert.match(fn, /createRunMerger\(/, '必须用流式合并器');
+  assert.match(fn, /flushFile\(\)/, '每个文件扫完必须收尾，否则内存回到 O(全部命中)');
+  assert.doesNotMatch(fn, /const found = \[\]/, '不得再建 found 数组 —— 1292 万条命中的物化就是本次 OOM 的根因');
+  assert.doesNotMatch(fn, /found\.push/, '不得把每条命中都推进数组');
+});
+
+test('★ 大规模重复：40 份相同文件 × 20 个，段数有限且 span 正确', () => {
+  const body = Array.from({ length: 30 }, (_, i) => 'const v' + i + ' = compute(' + i + ');').join('\n') + '\n';
+  const files = {};
+  for (let c = 0; c < 40; c++) {
+    for (let f = 0; f < 20; f++) { files['c' + c + '/f' + f + '.js'] = body; }
+  }
+  const ws = makeRepo(files);
+  try {
+    const dups = duplicateBlocks(ws.paths, 6, { minChars: 40 });
+    assert.ok(dups.length > 0, '全同文件之间必须报出重复');
+    for (const d of dups) assert.equal(d.span, 30, '每段应是整段 30 行（窗口 6），实际 ' + d.span);
+    assert.ok(dups.length <= 800 * 799 / 2, '段数不得超过文件对数（否则是没合并的滑窗重复）');
+  } finally {
+    ws.cleanup();
+  }
+});
 
 /** 造一个临时仓，写入若干文件，返回文件绝对路径列表。 */
 function makeRepo(files) {
@@ -27,6 +69,7 @@ function makeRepo(files) {
   const paths = [];
   for (const [name, body] of Object.entries(files)) {
     const p = join(dir, name);
+    mkdirSync(join(p, '..'), { recursive: true });
     writeFileSync(p, body, 'utf8');
     paths.push(p);
   }
