@@ -200,8 +200,11 @@ node cli.mjs --help
 | `excluded` | array | 逐根错误汇总（与 `errors` 同源） |
 | `errors` | array | 扫描错误：根不可读、后缀不支持、目录无法统计 |
 | `blacklisted` | object | `{count, dirs}`：因跳过规则**未进入候选**的源码文件。`count` = Σ`dirs[].files`；每条 `{path, kind, reason, files, error}`，`reason` ∈ `builtin`（内置黑名单）/ `caller`（调用方 skip）/ `dot-dir`（一级点目录）；`error` 非空表示该目录数不清，`files` 是**下界而不是 0 的结论** |
+| `zeroScan` | object \| null | **一个源码文件都没扫到**时的收据；扫到了则为 `null`。`{supported, extensions, otherExtensions, note}`：`supported`/`extensions` 是本次支持的源码后缀，`otherExtensions` 是该目录下实际见到但不在支持列表的后缀（封顶 12 种）。**它不改退出码**，只负责让「没检查」可见 |
 
 **不变量（可复算）**：`candidates + blacklisted.count` = 该扫描面上按后缀物理存在的源码文件数（gitignore 过滤前）。
+
+**为什么加 `zeroScan`（2026-11-22，13 个公开仓实测）**：`Newtonsoft.Json` 有 951 个 `.cs`，而当时扫描器只认 10 种后缀 ⇒ 扫到 0 个，两条判据报 `skip`、**退出码 0、warnings 空**。更隐蔽的是 `laravel/framework`：3,205 个 `.php` 只扫到 3 个 `.js`，`KISS-C1` 给出 **pass**「扫描 3 个文件，无超限」——**看着像检查过了**。后一种情形 `zeroScan` 抓不到（确实扫到了文件），那份口子归 `--min-coverage`；但只要扫到 0 个，就是百分之百什么都没检查，必须喊出来。
 
 **为什么加 `blacklisted`**：2026-11-18 外部实测（`g:/AMup`，27,075 个 JS）中，`vendor` 被整目录跳过 —— 937 个文件既不在 `candidates` 也不在 `errors` 里，而 27075 − 937 = 26138 与规则自报的"实检"数字逐字相等。gitignore 的排除有 `reason` + `sample`，黑名单的排除什么都没有：**收据结构不对称**，等于把"没扫"伪装成"扫了没问题"。
 

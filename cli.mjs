@@ -447,6 +447,29 @@ function main() {
   }
 
   /**
+   * 「一个源码文件都没扫到」的告警（2026-11-22，13 个公开仓实测）。
+   *
+   * ★ 缺口形态：`Newtonsoft.Json` 有 951 个 `.cs`，而扫描器当时只认 10 种后缀
+   *   ⇒ 扫到 **0 个**，两条判据报 `skip`，**退出码 0、warnings 空**。
+   *   `laravel/framework` 更隐蔽：3,205 个 `.php` 只扫到 3 个 `.js`，
+   *   `KISS-C1` 给出 `pass`「扫描 3 个文件，无超限」——**看着像检查过了**。
+   *
+   *   后一种情形这里是抓不到的（它确实扫到了文件），那份口子归 `--min-coverage`。
+   *   但只要扫到 0 个，就是**百分之百什么都没检查**，必须喊出来：
+   *   同时说清「支持哪些后缀」与「该目录里实际有哪些后缀」，让用户自己判断是哪边的问题。
+   *
+   * ★ 仍然**不改退出码**：是否把"没检查"判成失败，由 `--min-coverage` 显式选择（ICD §2）。
+   *   这里只保证「不静默」。
+   */
+  if (scan.report.zeroScan) {
+    const z = scan.report.zeroScan;
+    console.error(`未扫到任何源码文件（${ctx.repo}）。`);
+    console.error(`  支持的后缀: ${z.supported.join(' ')}`);
+    console.error(`  该目录下的后缀: ${z.otherExtensions.length ? z.otherExtensions.join(' ') : '（没有其它后缀的文件）'}`);
+    console.error('「没检查」不等于「检查了没问题」：本次所有代码级判据都不构成结论。');
+  }
+
+  /**
    * 代码树身份提示（**不参与退出码**）。
    *
    * 定位：`meta.tree` 是审计元数据，不是认证（ICD §5.2）。这里只回答
