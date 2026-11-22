@@ -13,6 +13,7 @@ import { missingEvidenceKeys } from './lib/evidence.mjs';
 import { compareTree, readTreeIdentity } from './lib/tree.mjs';
 import { validateConfig } from './lib/config.mjs';
 import { isPlainObject, isNonEmptyString, isRatio } from './lib/values.mjs';
+import { acceptanceMinCoverage } from './lib/coverage.mjs';
 
 const KNOWN = new Set(OPTIONS.map((o) => o.key));
 
@@ -364,7 +365,11 @@ function main() {
   }
 
   // --min-coverage：显式缺值/非 0..1 ⇒ 退出码 2。不得把 `true` 读成 1（A14-②）。
-  let minCoverage = null;
+  //
+  // ★ 2026-11-22（用户裁定方案 B）：**分档默认值** —— acceptance 档默认 0.8，其余档不启用。
+  //   原因见 lib/coverage.mjs 与 ICD §2：process 档「边写边查」时 skip 是合理的，
+  //   但验收档覆盖率不足意味着「没检查完」，那时 exit 3 才是正确语义。
+  let explicitMinCoverage = null;
   if (args['min-coverage'] !== undefined) {
     const raw = args['min-coverage'];
     if (raw === true) {
@@ -376,8 +381,10 @@ function main() {
       console.error(`--min-coverage 需为 0..1 的有限数字，收到: ${JSON.stringify(raw)}`);
       process.exit(EXIT.CONFIG);
     }
-    minCoverage = min;
+    explicitMinCoverage = min;
   }
+  const { value: minCoverage, source: coverageSource } =
+    acceptanceMinCoverage({ profile, explicit: explicitMinCoverage });
 
   const { results, ctx } = runRules({
     changeDir,

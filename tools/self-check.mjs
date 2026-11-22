@@ -582,9 +582,27 @@ function acceptance(c, st) {
    *   · `real-diff-notice`   ：拿真实变更量一次，**如实通报**结论（advisory，不参与绿红）
    * 于是本步里 C1/C3 的 SKIP 是**分工导致的**，不是"没验证"。
    */
+  /**
+   * 显式 `--min-coverage 0`：关掉 acceptance 档的默认下限。
+   *
+   * ★ 为什么这是**正确**而不是"把判据改绿"（2026-11-22 加此参数时的判断）：
+   *   acceptance 档现在默认 0.8（方案 B）。而本步**刻意**制造了 3 条 SKIP：
+   *     · DECOUPLE-2 —— 本项目未声明 boundaries 前缀
+   *     · DISCIPLINE-C1 / C3 —— 本步刻意不带 --diff（职责切分，见上方 KNOWN_SKIPS 注释）
+   *   于是 covered 恒为 9/12 = 0.75 < 0.8 ⇒ 每一步自检都 exit 3。
+   *
+   *   ★ 关键区别：**那 3 条 SKIP 是自检自己造成的，不是工具没检查**。
+   *     KNOWN_SKIPS 已经把每条 SKIP 登记了原因、且出现新 SKIP 就判红 ——
+   *     "跳过是被清点过的"这件事在**这一步之外的机制**里守着了。
+   *     在这里再叠一层覆盖率下限，只会得到一条永远红的门禁（判据消失），
+   *     而不是更严。
+   *
+   *   ⇒ 显式传 0，并在报告里保留那句 "按 --min-coverage 0 关闭" 的可见痕迹。
+   *     若哪天要把这步也卡覆盖率，正确做法是**先消除那 3 条 SKIP**，不是调这个值。
+   */
   const cmd =
     `node cli.mjs check --change "${c.change}" --profile acceptance --evidence "${c.evOut}"` +
-    ` --repo "${c.repo}" --config "${c.config}" ${codeArgs} --json`;
+    ` --repo "${c.repo}" --config "${c.config}" ${codeArgs} --min-coverage 0 --json`;
   process.stdout.write(`  … ${name.padEnd(22)} ${cmd}\n`);
   const r = spawnSync(`${cmd} > "${jsonFile}" 2> "${errFile}"`, { cwd: ROOT, shell: true, stdio: 'inherit' });
   const exitCode = r.status === null ? -1 : r.status;
